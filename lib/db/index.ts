@@ -119,6 +119,11 @@ function initializeDatabase() {
       page_count INTEGER,
       creation_date TEXT,
       modification_date TEXT,
+      summary TEXT,
+      document_type TEXT,
+      topics TEXT,
+      ai_enhanced INTEGER DEFAULT 0,
+      needs_review INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
       FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
@@ -135,6 +140,22 @@ function initializeDatabase() {
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Create document_chunks table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS document_chunks (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL,
+      page_number INTEGER NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      content_type TEXT NOT NULL DEFAULT 'text',
+      token_count INTEGER NOT NULL DEFAULT 0,
+      importance REAL NOT NULL DEFAULT 0.5,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (document_id) REFERENCES files(id) ON DELETE CASCADE
     )
   `);
 
@@ -453,6 +474,14 @@ export type PdfMetadata = {
   page_count?: number;
   creation_date?: string;
   modification_date?: string;
+  
+  // Additional fields for AI enhancement
+  summary?: string;
+  document_type?: string;
+  topics?: string;
+  ai_enhanced?: boolean;
+  needs_review?: boolean;
+  
   created_at: number;
   updated_at: number;
 };
@@ -469,6 +498,11 @@ export function savePdfMetadata(data: {
   pageCount?: number;
   creationDate?: string;
   modificationDate?: string;
+  summary?: string;
+  documentType?: string;
+  topics?: string;
+  aiEnhanced?: boolean;
+  needsReview?: boolean;
 }) {
   // Check if metadata already exists for this file
   const existing = getPdfMetadata(data.fileId);
@@ -535,8 +569,75 @@ export function getPdfMetadata(fileId: string): PdfMetadata | undefined {
   return stmt.get(fileId) as PdfMetadata | undefined;
 }
 
+// Document chunk functions
+export interface DocumentChunk {
+  id: string;
+  documentId: string;
+  pageNumber: number;
+  chunkIndex: number;
+  content: string;
+  contentType: string;
+  tokenCount: number;
+  importance: number;
+  createdAt: number;
+}
+
+export function saveDocumentChunk(data: {
+  documentId: string;
+  pageNumber: number;
+  chunkIndex: number;
+  content: string;
+  contentType?: string;
+  tokenCount?: number;
+  importance?: number;
+}): DocumentChunk {
+  const id = uuidv4();
+  const now = Math.floor(Date.now() / 1000);
+  
+  const stmt = db.prepare(`
+    INSERT INTO document_chunks (
+      id, document_id, page_number, chunk_index, 
+      content, content_type, token_count, importance, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    id,
+    data.documentId,
+    data.pageNumber,
+    data.chunkIndex,
+    data.content,
+    data.contentType || 'text',
+    data.tokenCount || 0,
+    data.importance || 0.5,
+    now
+  );
+  
+  return {
+    id,
+    documentId: data.documentId,
+    pageNumber: data.pageNumber,
+    chunkIndex: data.chunkIndex,
+    content: data.content,
+    contentType: data.contentType || 'text',
+    tokenCount: data.tokenCount || 0,
+    importance: data.importance || 0.5,
+    createdAt: now
+  };
+}
+
+// Settings type
+export interface Setting {
+  id: string;
+  user_id?: string;
+  key: string;
+  value: string;
+  created_at: number;
+  updated_at: number;
+}
+
 // Settings functions
-export function saveSetting(data: { userId?: string; key: string; value: string }) {
+export function saveSetting(data: { userId?: string; key: string; value: string }): Setting {
   // Check if setting already exists
   const existing = getSetting(data.key, data.userId);
   
@@ -549,7 +650,7 @@ export function saveSetting(data: { userId?: string; key: string; value: string 
     `);
     
     stmt.run(data.value, existing.id);
-    return getSettingById(existing.id);
+    return getSettingById(existing.id) as Setting;
   } else {
     // Insert new setting
     const stmt = db.prepare(`
@@ -559,24 +660,23 @@ export function saveSetting(data: { userId?: string; key: string; value: string 
     
     const id = uuidv4();
     stmt.run(id, data.userId || null, data.key, data.value);
-    
-    return getSettingById(id);
+    return getSettingById(id) as Setting;
   }
 }
 
-export function getSettingById(id: string) {
+export function getSettingById(id: string): Setting | undefined {
   const stmt = db.prepare('SELECT * FROM settings WHERE id = ?');
-  return stmt.get(id);
+  return stmt.get(id) as Setting | undefined;
 }
 
-export function getSetting(key: string, userId?: string) {
+export function getSetting(key: string, userId?: string): Setting | undefined {
   let stmt;
   if (userId) {
     stmt = db.prepare('SELECT * FROM settings WHERE key = ? AND user_id = ?');
-    return stmt.get(key, userId);
+    return stmt.get(key, userId) as Setting | undefined;
   } else {
     stmt = db.prepare('SELECT * FROM settings WHERE key = ? AND user_id IS NULL');
-    return stmt.get(key);
+    return stmt.get(key) as Setting | undefined;
   }
 }
 

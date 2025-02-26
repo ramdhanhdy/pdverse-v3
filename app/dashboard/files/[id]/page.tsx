@@ -42,6 +42,11 @@ type PdfMetadata = {
   page_count?: number;
   creation_date?: string;
   modification_date?: string;
+  summary?: string;
+  document_type?: string;
+  topics?: string;
+  ai_enhanced?: boolean;
+  needs_review?: boolean;
   created_at: number;
   updated_at: number;
 };
@@ -80,12 +85,14 @@ export default function FileViewPage() {
         }
         
         const data = await response.json();
-        setFile(data.file);
+        // Handle both response formats: { file: ... } or direct file object
+        const fileData = data.file || data;
+        setFile(fileData);
         
         // Fetch PDF metadata if available
-        if (data.file && data.file.id) {
+        if (fileData && fileData.id) {
           try {
-            const metadataResponse = await fetch(`/api/pdf-metadata?fileId=${data.file.id}`);
+            const metadataResponse = await fetch(`/api/pdf-metadata?fileId=${fileData.id}`);
             if (metadataResponse.ok) {
               const metadataData = await metadataResponse.json();
               setMetadata(metadataData.metadata);
@@ -497,6 +504,46 @@ export default function FileViewPage() {
                     <h3 className="text-sm font-medium">Modification Date</h3>
                     <p className="text-sm text-muted-foreground">
                       {new Date(metadata.modification_date).toLocaleString()}
+                    </p>
+                  </div>
+                )}
+                {metadata.summary && (
+                  <div>
+                    <h3 className="text-sm font-medium">Summary</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {metadata.summary}
+                    </p>
+                  </div>
+                )}
+                {metadata.document_type && (
+                  <div>
+                    <h3 className="text-sm font-medium">Document Type</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {metadata.document_type}
+                    </p>
+                  </div>
+                )}
+                {metadata.topics && (
+                  <div>
+                    <h3 className="text-sm font-medium">Topics</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {metadata.topics}
+                    </p>
+                  </div>
+                )}
+                {metadata.ai_enhanced && (
+                  <div>
+                    <h3 className="text-sm font-medium">AI Enhanced</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {metadata.ai_enhanced ? 'Yes' : 'No'}
+                    </p>
+                  </div>
+                )}
+                {metadata.needs_review && (
+                  <div>
+                    <h3 className="text-sm font-medium">Needs Review</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {metadata.needs_review ? 'Yes' : 'No'}
                     </p>
                   </div>
                 )}

@@ -39,3 +39,11 @@ export function truncateFilename(filename: string, maxLength = 25): string {
   const truncatedName = nameWithoutExtension.slice(0, maxLength - extension.length - 3) + '...';
   return `${truncatedName}.${extension}`;
 }
+
+/**
+ * Estimates the number of tokens in a text string
+ * This is a rough approximation - about 4 chars per token for English text
+ */
+export function estimateTokenCount(text: string): number {
+  return Math.ceil(text.length / 4);
+}
