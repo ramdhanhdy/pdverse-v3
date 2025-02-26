@@ -507,9 +507,16 @@ export function savePdfMetadata(data: {
   // Check if metadata already exists for this file
   const existing = getPdfMetadata(data.fileId);
   
+  // Convert boolean values to integers for SQLite
+  const sqliteData = {
+    ...data,
+    aiEnhanced: data.aiEnhanced !== undefined ? (data.aiEnhanced ? 1 : 0) : undefined,
+    needsReview: data.needsReview !== undefined ? (data.needsReview ? 1 : 0) : undefined
+  };
+  
   if (existing) {
     // Update existing metadata
-    const updates = Object.entries(data)
+    const updates = Object.entries(sqliteData)
       .filter(([key, _]) => key !== 'fileId') // Exclude fileId from updates
       .filter(([_, value]) => value !== undefined)
       .map(([key, _]) => {
@@ -527,7 +534,7 @@ export function savePdfMetadata(data: {
     
     const stmt = db.prepare(sql);
     const values = [
-      ...Object.entries(data)
+      ...Object.entries(sqliteData)
         .filter(([key, _]) => key !== 'fileId')
         .filter(([_, value]) => value !== undefined)
         .map(([_, value]) => value),
@@ -537,8 +544,8 @@ export function savePdfMetadata(data: {
     stmt.run(...values);
   } else {
     // Insert new metadata
-    const columns = ['file_id', ...Object.keys(data)
-      .filter(key => key !== 'fileId' && data[key as keyof typeof data] !== undefined)
+    const columns = ['file_id', ...Object.keys(sqliteData)
+      .filter(key => key !== 'fileId' && sqliteData[key as keyof typeof sqliteData] !== undefined)
       .map(key => key.replace(/([A-Z])/g, '_$1').toLowerCase())
     ];
     
@@ -552,7 +559,7 @@ export function savePdfMetadata(data: {
     const stmt = db.prepare(sql);
     const values = [
       data.fileId,
-      ...Object.entries(data)
+      ...Object.entries(sqliteData)
         .filter(([key, _]) => key !== 'fileId')
         .filter(([_, value]) => value !== undefined)
         .map(([_, value]) => value)

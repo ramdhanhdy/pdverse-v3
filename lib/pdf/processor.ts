@@ -21,7 +21,7 @@ export async function processPdf(fileId: string, filePath: string) {
     
     // Step 2: Enhance with Gemini if needed
     console.log('Step 2: Enhancing metadata with Gemini AI...');
-    const enhancedMetadata = await enhanceMetadataWithGemini(metadata, fullText);
+    const enhancedMetadata = await enhanceMetadataWithGemini(metadata, fullText, filePath);
     
     if (enhancedMetadata.aiEnhanced) {
       console.log('Metadata was enhanced by Gemini AI with the following fields:');

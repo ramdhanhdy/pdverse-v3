@@ -11,7 +11,7 @@ import 'react-pdf/dist/esm/Page/TextLayer.css';
 import { toast } from "sonner";
 import { 
   ChevronLeft, ChevronRight, ZoomIn, ZoomOut, 
-  Download, Printer, Maximize, Search, List
+  Download, Printer, Maximize, Search, List, Wand2
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -210,6 +210,34 @@ export default function FileViewPage() {
     } catch (error) {
       console.error("Error deleting file:", error);
       toast.error("Failed to delete file. Please try again.");
+    }
+  };
+
+  const enhanceMetadata = async () => {
+    if (!file) return;
+    
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/enhance-metadata', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fileId: file.id }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to enhance metadata');
+      }
+      
+      const data = await response.json();
+      setMetadata(data.metadata);
+      toast.success('Metadata enhanced successfully');
+    } catch (error) {
+      console.error('Error enhancing metadata:', error);
+      toast.error('Failed to enhance metadata. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -433,7 +461,9 @@ export default function FileViewPage() {
 
           {metadata && (
             <Card className="p-4">
-              <h2 className="text-xl font-semibold mb-4">PDF Metadata</h2>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">PDF Metadata</h2>
+              </div>
               <div className="space-y-4">
                 {metadata.title && (
                   <div>
@@ -547,6 +577,31 @@ export default function FileViewPage() {
                     </p>
                   </div>
                 )}
+                
+                <div className="mt-4 pt-4 border-t">
+                  <h3 className="text-sm font-medium mb-2">Missing Information</h3>
+                  <div className="space-y-1">
+                    {!metadata.title && (
+                      <p className="text-sm text-muted-foreground">• Title</p>
+                    )}
+                    {!metadata.author && (
+                      <p className="text-sm text-muted-foreground">• Author</p>
+                    )}
+                    {!metadata.summary && (
+                      <p className="text-sm text-muted-foreground">• Summary</p>
+                    )}
+                    {!metadata.document_type && (
+                      <p className="text-sm text-muted-foreground">• Document Type</p>
+                    )}
+                    {!metadata.topics && (
+                      <p className="text-sm text-muted-foreground">• Topics</p>
+                    )}
+                    {metadata.title && metadata.author && metadata.summary && 
+                     metadata.document_type && metadata.topics && (
+                      <p className="text-sm text-green-600">All metadata fields are complete!</p>
+                    )}
+                  </div>
+                </div>
               </div>
             </Card>
           )}
