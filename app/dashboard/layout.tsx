@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import AnimatedSidebarButton from "@/components/animated-sidebar-button";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function DashboardLayout({
   children,
@@ -135,12 +137,19 @@ export default function DashboardLayout({
             sidebarOpen ? "w-64" : "w-0 lg:w-16"
           } fixed inset-y-0 z-10 flex flex-col border-r bg-background transition-all duration-300 ease-in-out lg:relative lg:translate-x-0`}
         >
-          <div className={`border-b px-4 py-4 ${!sidebarOpen && "lg:justify-center"} flex items-center`}>
+          <div className={`border-b px-4 py-4 ${!sidebarOpen && "lg:justify-center"} flex items-center relative`}>
             <div className={`flex items-center gap-2 ${!sidebarOpen && "lg:hidden"}`}>
-              <h1 className="text-lg font-semibold">PDVerse</h1>
+              <div className="flex-1 flex items-center justify-between">
+                <Link
+                  href="/dashboard"
+                  className="text-xl font-bold tracking-tight"
+                >
+                  PDVerse
+                </Link>
+              </div>
             </div>
-            {/* Small logo for collapsed sidebar */}
-            <div className={`${sidebarOpen && "lg:hidden"} hidden lg:flex justify-center`}>
+            {/* No logo for collapsed sidebar */}
+            <div className={`${sidebarOpen ? "lg:hidden" : "hidden"} hidden`}>
               <h1 className="text-lg font-semibold">PD</h1>
             </div>
           </div>
@@ -254,78 +263,53 @@ export default function DashboardLayout({
               </Link>
             ))}
           </div>
-          {/* User section - expanded sidebar */}
-          <div className={`border-t p-4 ${!sidebarOpen && "lg:hidden"}`}>
-            <div className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-full bg-muted"></div>
-              <div className="flex flex-col">
-                <span className="text-xs font-medium">John Doe</span>
-                <span className="text-xs text-muted-foreground">john@example.com</span>
+          {/* User section in sidebar */}
+          <div className={`${!sidebarOpen && "lg:hidden"} mt-auto border-t p-4`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-full bg-muted"></div>
+                <div>
+                  <div className="font-medium">John Doe</div>
+                  <span className="text-xs text-muted-foreground">john@example.com</span>
+                </div>
               </div>
+              {/* Add theme toggle in desktop user section */}
+              <ThemeToggle />
             </div>
           </div>
           {/* User section - collapsed sidebar */}
-          <div className={`${sidebarOpen && "lg:hidden"} hidden lg:flex border-t p-4 items-center justify-center`}>
+          <div className={`${sidebarOpen && "lg:hidden"} hidden lg:flex flex-col border-t p-4 items-center justify-center gap-4`}>
             <div className="h-8 w-8 rounded-full bg-muted" title="John Doe"></div>
+            <ThemeToggle />
           </div>
         </aside>
         {/* Main content */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          <main className={`flex-1 overflow-auto ${isChatPage ? 'p-0' : 'p-4 lg:p-6'}`}>
-            {/* Sidebar toggle buttons */}
-            {!isChatPage && (
-              <div className="flex items-center justify-between mb-4">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="lg:hidden"
-                  onClick={toggleSidebar}
-                  aria-label="Toggle mobile sidebar"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-6 w-6"
-                  >
-                    <line x1="4" x2="20" y1="12" y2="12" />
-                    <line x1="4" x2="20" y1="6" y2="6" />
-                    <line x1="4" x2="20" y1="18" y2="18" />
-                  </svg>
-                </Button>
-                
-                {/* Desktop sidebar toggle - visible on all screens */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={toggleSidebar}
-                  className="flex items-center gap-1 text-sm ml-auto"
-                  aria-label="Toggle sidebar"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className={`h-4 w-4 transition-transform ${sidebarOpen ? "" : "rotate-180"}`}
-                  >
-                    <path d="M15 18l-6-6 6-6" />
-                  </svg>
-                  {sidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
-                </Button>
-              </div>
-            )}
+          <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-4 sm:px-6 lg:hidden">
+            <AnimatedSidebarButton
+              isOpen={sidebarOpen}
+              onClick={toggleSidebar}
+              className="lg:hidden"
+            />
+            <div className="flex-1 flex items-center justify-between">
+              <Link
+                href="/dashboard"
+                className="text-lg font-semibold tracking-tight"
+              >
+                PDVerse
+              </Link>
+              <ThemeToggle />
+            </div>
+          </header>
+          <main className={`flex-1 overflow-hidden ${isChatPage ? 'p-0' : 'p-4 lg:p-6'}`}>
+            {/* Sidebar toggle button - always visible on desktop */}
+            <div className={`${isChatPage ? 'p-4 pt-4' : 'mb-4'} hidden lg:flex`}>
+              <AnimatedSidebarButton
+                isOpen={sidebarOpen}
+                onClick={toggleSidebar}
+                className="hidden lg:flex"
+              />
+            </div>
             {children}
           </main>
         </div>

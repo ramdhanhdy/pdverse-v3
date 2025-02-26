@@ -159,6 +159,20 @@ function initializeDatabase() {
     )
   `);
 
+  // Create document_chunks_fts table for full-text search
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts USING fts5 (
+      content,
+      content_type,
+      document_id,
+      page_number,
+      chunk_index,
+      token_count,
+      importance,
+      created_at
+    )
+  `);
+
   console.log(`Database initialized at: ${DB_PATH}`);
   console.log('Database initialized successfully');
 }
@@ -620,6 +634,23 @@ export function saveDocumentChunk(data: {
     now
   );
   
+  // Insert into FTS table
+  const ftsStmt = db.prepare(`
+    INSERT INTO document_chunks_fts (
+      content, content_type, document_id, page_number, chunk_index, token_count, importance, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  ftsStmt.run(
+    data.content,
+    data.contentType || 'text',
+    data.documentId,
+    data.pageNumber,
+    data.chunkIndex,
+    data.tokenCount || 0,
+    data.importance || 0.5,
+    now
+  );
+  
   return {
     id,
     documentId: data.documentId,
@@ -631,6 +662,56 @@ export function saveDocumentChunk(data: {
     importance: data.importance || 0.5,
     createdAt: now
   };
+}
+
+export function getDocumentChunks(documentId: string): DocumentChunk[] {
+  const stmt = db.prepare(`
+    SELECT * FROM document_chunks 
+    WHERE document_id = ? 
+    ORDER BY page_number, chunk_index
+  `);
+  
+  return stmt.all(documentId) as DocumentChunk[];
+}
+
+export function searchDocumentChunks(query: string, limit: number = 20): {
+  chunk: DocumentChunk,
+  fileInfo: { id: string; filename: string; original_filename: string; }
+}[] {
+  // Use FTS5 to search document chunks
+  const stmt = db.prepare(`
+    SELECT 
+      dc.id, dc.document_id, dc.page_number, dc.chunk_index, 
+      dc.content, dc.content_type, dc.token_count, dc.importance, dc.created_at,
+      f.id as file_id, f.filename, f.original_filename
+    FROM document_chunks_fts fts
+    JOIN document_chunks dc ON fts.rowid = dc.rowid
+    JOIN files f ON dc.document_id = f.id
+    WHERE fts.content MATCH ?
+    ORDER BY rank
+    LIMIT ?
+  `);
+  
+  const results = stmt.all(query, limit);
+  
+  return results.map((row: any) => ({
+    chunk: {
+      id: row.id,
+      documentId: row.document_id,
+      pageNumber: row.page_number,
+      chunkIndex: row.chunk_index,
+      content: row.content,
+      contentType: row.content_type,
+      tokenCount: row.token_count,
+      importance: row.importance,
+      createdAt: row.created_at
+    },
+    fileInfo: {
+      id: row.file_id,
+      filename: row.filename,
+      original_filename: row.original_filename
+    }
+  }));
 }
 
 // Settings type
