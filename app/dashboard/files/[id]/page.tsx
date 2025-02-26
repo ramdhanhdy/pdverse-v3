@@ -5,9 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { formatBytes } from "@/lib/utils";
-import { Document, Page, pdfjs, Outline } from "react-pdf";
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-import 'react-pdf/dist/esm/Page/TextLayer.css';
 import { toast } from "sonner";
 import { 
   ChevronLeft, ChevronRight, ZoomIn, ZoomOut, 
@@ -16,9 +13,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-
-// Set up the worker for PDF.js outside of component to avoid ESM issues
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
 type FileDetails = {
   id: string;
@@ -56,21 +50,13 @@ export default function FileViewPage() {
   const router = useRouter();
   const [file, setFile] = useState<FileDetails | null>(null);
   const [metadata, setMetadata] = useState<PdfMetadata | null>(null);
-  const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [scale, setScale] = useState(1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [searchText, setSearchText] = useState("");
   const [showOutline, setShowOutline] = useState(false);
-  const [outline, setOutline] = useState<any[]>([]);
   const pdfContainerRef = useRef<HTMLDivElement>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
-
-  // Initialize the PDF.js worker on the client side
-  useEffect(() => {
-    // Set worker directly without dynamic import
-    pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
-  }, []);
 
   useEffect(() => {
     const fetchFileDetails = async () => {
@@ -113,16 +99,36 @@ export default function FileViewPage() {
     fetchFileDetails();
   }, [params.id, router]);
 
-  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
-    setNumPages(numPages);
-  };
+  useEffect(() => {
+    if (file) {
+      console.log("PDF Viewer - file object:", file);
+      console.log("PDF Viewer - trying to load file from path:", file.path);
+      
+      // Calculate and log the absolute URL
+      const absoluteUrl = window.location.origin + file.path;
+      console.log("PDF Viewer - absolute URL:", absoluteUrl);
+      
+      // Try to fetch the file directly to check if it's accessible
+      fetch(file.path)
+        .then(response => {
+          console.log("PDF fetch response status:", response.status);
+          return response.blob();
+        })
+        .then(blob => {
+          console.log("PDF fetch success, content type:", blob.type);
+        })
+        .catch(error => {
+          console.error("PDF fetch failed:", error);
+        });
+    }
+  }, [file]);
 
   const goToPrevPage = () => {
     setPageNumber((prev) => Math.max(prev - 1, 1));
   };
 
   const goToNextPage = () => {
-    setPageNumber((prev) => Math.min(prev + 1, numPages || 1));
+    setPageNumber((prev) => prev + 1);
   };
 
   const zoomIn = () => {
@@ -168,25 +174,6 @@ export default function FileViewPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const handleOutlineItemClick = (item: any) => {
-    if (item.dest) {
-      // If the item has a destination, navigate to that page
-      // This is a simplified approach; in a real app you might want to
-      // handle more complex destinations
-      if (typeof item.dest === 'string') {
-        // For named destinations, you'd need to resolve them first
-        console.log("Named destination:", item.dest);
-      } else if (Array.isArray(item.dest)) {
-        const pageNumber = item.dest[0] + 1; // PDF pages are 0-indexed
-        setPageNumber(pageNumber);
-      }
-    }
-  };
-
-  const onItemClick = ({ pageNumber }: { pageNumber: number }) => {
-    setPageNumber(pageNumber);
   };
 
   const deleteFile = async () => {
@@ -273,7 +260,6 @@ export default function FileViewPage() {
           <div className="text-sm text-muted-foreground">
             {formatBytes(file.size)} • 
             {new Date(file.updated_at * 1000).toLocaleDateString()}
-            {metadata?.page_count && ` • ${metadata.page_count} pages`}
           </div>
           {metadata?.author && (
             <Badge variant="outline" className="mr-2">
@@ -300,19 +286,17 @@ export default function FileViewPage() {
                   variant="outline"
                   size="icon"
                   onClick={goToPrevPage}
-                  disabled={pageNumber <= 1}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   <span className="sr-only">Previous page</span>
                 </Button>
                 <span className="text-sm">
-                  Page {pageNumber} of {numPages || "?"}
+                  Page {pageNumber}
                 </span>
                 <Button
                   variant="outline"
                   size="icon"
                   onClick={goToNextPage}
-                  disabled={pageNumber >= (numPages || 1)}
                 >
                   <ChevronRight className="h-4 w-4" />
                   <span className="sr-only">Next page</span>
@@ -340,14 +324,6 @@ export default function FileViewPage() {
                   <Maximize className="h-4 w-4" />
                   <span className="sr-only">Full Screen</span>
                 </Button>
-                <Button 
-                  variant="outline" 
-                  size="icon" 
-                  onClick={() => setShowOutline(!showOutline)}
-                >
-                  <List className="h-4 w-4" />
-                  <span className="sr-only">Toggle Outline</span>
-                </Button>
               </div>
             </div>
             
@@ -368,56 +344,8 @@ export default function FileViewPage() {
             
             <div 
               ref={pdfContainerRef}
-              className={`flex-1 overflow-auto flex ${showOutline ? 'justify-start' : 'justify-center'} bg-accent/30 rounded-md ${isFullScreen ? 'fullscreen-pdf' : ''}`}
+              className={`flex-1 overflow-auto flex justify-center bg-accent/30 rounded-md ${isFullScreen ? 'fullscreen-pdf' : ''}`}
             >
-              {showOutline && (
-                <div className="w-64 bg-background p-4 overflow-auto border-r">
-                  <h3 className="font-medium mb-2">Document Outline</h3>
-                  <Document file={file.path}>
-                    <Outline onItemClick={onItemClick} />
-                  </Document>
-                </div>
-              )}
-              <div className="flex-1 flex justify-center">
-                <Document
-                  file={file.path}
-                  onLoadSuccess={onDocumentLoadSuccess}
-                  loading={
-                    <div className="flex justify-center items-center h-full">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                    </div>
-                  }
-                  error={
-                    <div className="flex flex-col items-center justify-center h-full gap-4 p-8">
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-12 w-12 text-destructive"
-                      >
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" x2="12" y1="8" y2="12" />
-                        <line x1="12" x2="12.01" y1="16" y2="16" />
-                      </svg>
-                      <h3 className="text-xl font-semibold">Error loading PDF</h3>
-                      <p className="text-muted-foreground text-center">
-                        There was an error loading this PDF file. It may be corrupted or unsupported.
-                      </p>
-                    </div>
-                  }
-                >
-                  <Page
-                    pageNumber={pageNumber}
-                    scale={scale}
-                    renderTextLayer={true}
-                    renderAnnotationLayer={true}
-                  />
-                </Document>
-              </div>
             </div>
           </Card>
         </div>

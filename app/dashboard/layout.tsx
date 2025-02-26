@@ -12,9 +12,6 @@ export default function DashboardLayout({
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const pathname = usePathname();
-  
-  // Check if we're on the chat page
-  const isChatPage = pathname.includes('/dashboard/chat');
 
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
@@ -126,51 +123,33 @@ export default function DashboardLayout({
     },
   ];
 
+  // Check if we're on the chat page
+  const isChatPage = pathname.includes('/dashboard/chat');
+
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
       <div className="flex flex-1">
         {/* Sidebar */}
         <aside
           className={`${
-            sidebarOpen ? "w-64" : "w-0 -translate-x-full"
-          } fixed inset-y-0 z-10 flex flex-col border-r bg-background transition-all lg:relative lg:translate-x-0`}
+            sidebarOpen ? "w-64" : "w-0 lg:w-16"
+          } fixed inset-y-0 z-10 flex flex-col border-r bg-background transition-all duration-300 ease-in-out lg:relative lg:translate-x-0`}
         >
-          <div className="border-b px-4 py-4">
-            <div className="flex items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-6 w-6"
-              >
-                <path d="M5 3a2 2 0 0 0-2 2" />
-                <path d="M19 3a2 2 0 0 1 2 2" />
-                <path d="M21 19a2 2 0 0 1-2 2" />
-                <path d="M5 21a2 2 0 0 1-2-2" />
-                <path d="M9 3h1" />
-                <path d="M9 21h1" />
-                <path d="M14 3h1" />
-                <path d="M14 21h1" />
-                <path d="M3 9v1" />
-                <path d="M21 9v1" />
-                <path d="M3 14v1" />
-                <path d="M21 14v1" />
-              </svg>
+          <div className={`border-b px-4 py-4 ${!sidebarOpen && "lg:justify-center"} flex items-center`}>
+            <div className={`flex items-center gap-2 ${!sidebarOpen && "lg:hidden"}`}>
               <h1 className="text-lg font-semibold">PDVerse</h1>
             </div>
+            {/* Small logo for collapsed sidebar */}
+            <div className={`${sidebarOpen && "lg:hidden"} hidden lg:flex justify-center`}>
+              <h1 className="text-lg font-semibold">PD</h1>
+            </div>
           </div>
-          <div className="flex-1 overflow-auto py-2">
+          <div className={`flex-1 overflow-auto py-2 ${!sidebarOpen && "lg:hidden"}`}>
             <nav className="grid items-start px-2 text-sm font-medium">
               <div className="px-2 py-2 text-xs font-semibold tracking-wide text-muted-foreground">
                 NAVIGATION
               </div>
-              <div className="space-y-1">
+              <div className="grid gap-1">
                 {navigation.map((item) => (
                   <Link
                     key={item.name}
@@ -232,74 +211,123 @@ export default function DashboardLayout({
               </div>
             </nav>
           </div>
-          <div className="border-t p-4">
+          {/* Collapsed sidebar navigation (only icons) */}
+          <div className={`${sidebarOpen && "lg:hidden"} hidden lg:flex flex-col items-center py-4`}>
+            {navigation.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={`flex items-center justify-center w-10 h-10 my-1 rounded-lg text-muted-foreground transition-all hover:text-foreground ${
+                  pathname === item.href ? "bg-muted text-foreground" : ""
+                }`}
+                title={item.name}
+              >
+                {item.icon}
+              </Link>
+            ))}
+            
+            {/* Chat navigation in collapsed mode */}
+            {chatNavigation.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={`flex items-center justify-center w-10 h-10 my-1 rounded-lg text-muted-foreground transition-all hover:text-foreground ${
+                  pathname.startsWith(item.href) ? "bg-muted text-foreground" : ""
+                }`}
+                title={item.name}
+              >
+                {item.icon}
+              </Link>
+            ))}
+            
+            {/* Settings navigation in collapsed mode */}
+            {settingsNavigation.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={`flex items-center justify-center w-10 h-10 my-1 rounded-lg text-muted-foreground transition-all hover:text-foreground ${
+                  pathname === item.href ? "bg-muted text-foreground" : ""
+                }`}
+                title={item.name}
+              >
+                {item.icon}
+              </Link>
+            ))}
+          </div>
+          {/* User section - expanded sidebar */}
+          <div className={`border-t p-4 ${!sidebarOpen && "lg:hidden"}`}>
             <div className="flex items-center gap-3">
               <div className="h-8 w-8 rounded-full bg-muted"></div>
-              <div>
-                <p className="text-sm font-medium">User Name</p>
-                <p className="text-xs text-muted-foreground">user@example.com</p>
+              <div className="flex flex-col">
+                <span className="text-xs font-medium">John Doe</span>
+                <span className="text-xs text-muted-foreground">john@example.com</span>
               </div>
             </div>
+          </div>
+          {/* User section - collapsed sidebar */}
+          <div className={`${sidebarOpen && "lg:hidden"} hidden lg:flex border-t p-4 items-center justify-center`}>
+            <div className="h-8 w-8 rounded-full bg-muted" title="John Doe"></div>
           </div>
         </aside>
         {/* Main content */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          <header className={`flex h-14 items-center gap-4 ${isChatPage ? '' : 'border-b'} bg-background px-4 lg:px-6`}>
-            <Button
-              variant="outline"
-              size="icon"
-              className="lg:hidden"
-              onClick={toggleSidebar}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-6 w-6"
-              >
-                <line x1="4" x2="20" y1="12" y2="12" />
-                <line x1="4" x2="20" y1="6" y2="6" />
-                <line x1="4" x2="20" y1="18" y2="18" />
-              </svg>
-              <span className="sr-only">Toggle Menu</span>
-            </Button>
-            <div className="w-full flex-1">
-              {/* Only show search on non-chat pages */}
-              {!pathname.includes('/dashboard/chat') && (
-                <form>
-                  <div className="relative">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"
-                    >
-                      <circle cx="11" cy="11" r="8" />
-                      <path d="m21 21-4.3-4.3" />
-                    </svg>
-                    <input
-                      type="search"
-                      placeholder="Search files..."
-                      className="w-full rounded-md border border-input bg-background pl-8 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                  </div>
-                </form>
-              )}
-            </div>
-          </header>
-          <main className={`flex-1 overflow-auto ${isChatPage ? 'p-0' : 'p-4 lg:p-6'}`}>{children}</main>
+          <main className={`flex-1 overflow-auto ${isChatPage ? 'p-0' : 'p-4 lg:p-6'}`}>
+            {/* Sidebar toggle buttons */}
+            {!isChatPage && (
+              <div className="flex items-center justify-between mb-4">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="lg:hidden"
+                  onClick={toggleSidebar}
+                  aria-label="Toggle mobile sidebar"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-6 w-6"
+                  >
+                    <line x1="4" x2="20" y1="12" y2="12" />
+                    <line x1="4" x2="20" y1="6" y2="6" />
+                    <line x1="4" x2="20" y1="18" y2="18" />
+                  </svg>
+                </Button>
+                
+                {/* Desktop sidebar toggle - visible on all screens */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={toggleSidebar}
+                  className="flex items-center gap-1 text-sm ml-auto"
+                  aria-label="Toggle sidebar"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`h-4 w-4 transition-transform ${sidebarOpen ? "" : "rotate-180"}`}
+                  >
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
+                  {sidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
+                </Button>
+              </div>
+            )}
+            {children}
+          </main>
         </div>
       </div>
     </div>

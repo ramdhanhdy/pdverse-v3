@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatBytes, truncateFilename } from "@/lib/utils";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
 
 type FileItem = {
   id: string;
@@ -21,8 +22,11 @@ type FileItem = {
 export default function FilesPage() {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [filteredFiles, setFilteredFiles] = useState<FileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Fetch files from API
   useEffect(() => {
@@ -50,6 +54,40 @@ export default function FilesPage() {
     fetchFiles();
   }, []);
 
+  useEffect(() => {
+    if (!searchQuery) {
+      setFilteredFiles(files);
+      return;
+    }
+
+    // Add a small delay to show the searching state
+    setIsSearching(true);
+    const searchTimeout = setTimeout(() => {
+      const query = searchQuery.toLowerCase();
+      const filtered = files.filter((file) => {
+        // Search in filename
+        if (file.original_filename.toLowerCase().includes(query)) {
+          return true;
+        }
+        // Search in system filename
+        if (file.filename.toLowerCase().includes(query)) {
+          return true;
+        }
+        // Search in mimetype
+        if (file.mimetype.toLowerCase().includes(query)) {
+          return true;
+        }
+        
+        return false;
+      });
+      
+      setFilteredFiles(filtered);
+      setIsSearching(false);
+    }, 300);
+
+    return () => clearTimeout(searchTimeout);
+  }, [files, searchQuery]);
+
   const toggleFileSelection = (id: string) => {
     setSelectedFiles((prev) =>
       prev.includes(id) ? prev.filter((fileId) => fileId !== id) : [...prev, id]
@@ -57,10 +95,10 @@ export default function FilesPage() {
   };
 
   const selectAllFiles = () => {
-    if (selectedFiles.length === files.length) {
+    if (selectedFiles.length === filteredFiles.length) {
       setSelectedFiles([]);
     } else {
-      setSelectedFiles(files.map((file) => file.id));
+      setSelectedFiles(filteredFiles.map((file) => file.id));
     }
   };
 
@@ -91,17 +129,45 @@ export default function FilesPage() {
     }
   };
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+  };
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Your Files</h1>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setView("grid")}
-            className={view === "grid" ? "bg-accent" : ""}
-          >
+      <div className="flex flex-col-reverse sm:flex-row items-start sm:items-center justify-between mb-2">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold tracking-tight">Your Files</h1>
+            {searchQuery && (
+              <div className="flex items-center bg-accent/50 rounded-full px-3 py-1 text-sm gap-1">
+                <span>Search: {searchQuery}</span>
+                {isSearching && (
+                  <div className="w-3 h-3 rounded-full border-t-2 border-primary animate-spin mr-1"></div>
+                )}
+                <button 
+                  onClick={clearSearch}
+                  className="hover:text-primary"
+                  aria-label="Clear search"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                    <path d="M18 6 6 18"></path>
+                    <path d="m6 6 12 12"></path>
+                  </svg>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <form onSubmit={handleSearch} className="w-full flex gap-2 items-center">
+          <div className="relative flex-1 max-w-md">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
@@ -110,43 +176,90 @@ export default function FilesPage() {
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="h-4 w-4"
+              className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
             >
-              <rect width="7" height="7" x="3" y="3" rx="1" />
-              <rect width="7" height="7" x="14" y="3" rx="1" />
-              <rect width="7" height="7" x="14" y="14" rx="1" />
-              <rect width="7" height="7" x="3" y="14" rx="1" />
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
             </svg>
-            <span className="sr-only">Grid view</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setView("list")}
-            className={view === "list" ? "bg-accent" : ""}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-            >
-              <line x1="8" x2="21" y1="6" y2="6" />
-              <line x1="8" x2="21" y1="12" y2="12" />
-              <line x1="8" x2="21" y1="18" y2="18" />
-              <line x1="3" x2="3" y1="6" y2="6" />
-              <line x1="3" x2="3" y1="12" y2="12" />
-              <line x1="3" x2="3" y1="18" y2="18" />
-            </svg>
-            <span className="sr-only">List view</span>
-          </Button>
+            <Input
+              type="search"
+              placeholder="Search files by name..."
+              className="pl-10 pr-10 w-full focus-visible:ring-primary"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <path d="M18 6 6 18"></path>
+                  <path d="m6 6 12 12"></path>
+                </svg>
+              </button>
+            )}
+          </div>
           <Link href="/dashboard/files/upload">
             <Button>Upload</Button>
           </Link>
+        </form>
+      </div>
+
+      <div className="flex flex-col-reverse sm:flex-row items-start sm:items-center justify-between mb-4">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setView("grid")}
+              className={view === "grid" ? "bg-accent" : ""}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4"
+              >
+                <rect width="7" height="7" x="3" y="3" rx="1" />
+                <rect width="7" height="7" x="14" y="3" rx="1" />
+                <rect width="7" height="7" x="14" y="14" rx="1" />
+                <rect width="7" height="7" x="3" y="14" rx="1" />
+              </svg>
+              <span className="sr-only">Grid view</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setView("list")}
+              className={view === "list" ? "bg-accent" : ""}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4"
+              >
+                <line x1="8" x2="21" y1="6" y2="6" />
+                <line x1="8" x2="21" y1="12" y2="12" />
+                <line x1="8" x2="21" y1="18" y2="18" />
+                <line x1="3" x2="3" y1="6" y2="6" />
+                <line x1="3" x2="3" y1="12" y2="12" />
+                <line x1="3" x2="3" y1="18" y2="18" />
+              </svg>
+              <span className="sr-only">List view</span>
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -157,7 +270,7 @@ export default function FilesPage() {
             size="sm"
             onClick={selectAllFiles}
           >
-            {selectedFiles.length === files.length && files.length > 0
+            {selectedFiles.length === filteredFiles.length && filteredFiles.length > 0
               ? "Deselect All"
               : "Select All"}
           </Button>
@@ -172,7 +285,7 @@ export default function FilesPage() {
           )}
         </div>
         <div className="text-sm text-muted-foreground">
-          {files.length} {files.length === 1 ? "file" : "files"}
+          {filteredFiles.length} {filteredFiles.length === 1 ? "file" : "files"}
         </div>
       </div>
 
@@ -180,20 +293,31 @@ export default function FilesPage() {
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
-      ) : files.length === 0 ? (
+      ) : filteredFiles.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 gap-4">
           <div className="text-4xl">📄</div>
-          <h3 className="text-xl font-semibold">No files yet</h3>
-          <p className="text-muted-foreground text-center max-w-md">
-            Upload your first PDF file to get started with PDVerse.
-          </p>
-          <Link href="/dashboard/files/upload">
-            <Button>Upload Your First File</Button>
-          </Link>
+          {searchQuery ? (
+            <>
+              <h3 className="text-xl font-semibold">No matching files</h3>
+              <p className="text-center text-muted-foreground max-w-md">
+                No files match your search term "{searchQuery}". Try a different search or upload a new file.
+              </p>
+            </>
+          ) : (
+            <>
+              <h3 className="text-xl font-semibold">No files yet</h3>
+              <p className="text-center text-muted-foreground max-w-md">
+                Upload your first file to get started.
+              </p>
+            </>
+          )}
+          <Button onClick={() => window.location.href = "/dashboard/upload"}>
+            Upload Files
+          </Button>
         </div>
       ) : view === "grid" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {files.map((file) => (
+          {filteredFiles.map((file) => (
             <Card
               key={file.id}
               className={`overflow-hidden ${
@@ -274,7 +398,7 @@ export default function FilesPage() {
         </div>
       ) : (
         <div className="border rounded-md divide-y">
-          {files.map((file) => (
+          {filteredFiles.map((file) => (
             <div
               key={file.id}
               className={`flex items-center p-3 hover:bg-accent ${
