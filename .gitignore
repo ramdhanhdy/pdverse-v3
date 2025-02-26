@@ -1,19 +1,53 @@
-node_modules
-
-.env
-.env.local
-.env.local.example
-.env.local.dev
-.env.production
-
-/uploads
-
-/drizzle
-
-/data
-
 /.next
-
-design.md
-
 /.vscode
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+*.pdf
+# testing
+/coverage
+*.db    
+*.db-shm
+*.db-wal
+# production
+/build
+
+# misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# System Files
+.DS_Store
+Thumbs.db
