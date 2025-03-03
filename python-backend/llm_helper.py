@@ -135,3 +135,126 @@ def format_search_results(chunks, query):
     response += f"Found {len(chunks)} results. Ask follow-up questions to learn more about specific results."
     
     return response
+
+def build_document_chat_context(chunks, query, document_metadata=None):
+    """
+    Build an enhanced context for document chat mode using the multi-layer retrieval results.
+    
+    This function creates a rich context that includes:
+    1. Document metadata and overview
+    2. Relevant chunks with their structural context
+    3. Entity information and relationships
+    4. Contextual importance indicators
+    
+    Args:
+        chunks: Results from document_chat_search
+        query: The user's query
+        document_metadata: Additional document metadata
+        
+    Returns:
+        A formatted context string for the LLM
+    """
+    if not chunks:
+        return "No relevant information found in the document."
+    
+    # Start with document overview
+    context = "# Document Overview\n"
+    
+    # Add document metadata if available
+    if document_metadata:
+        title = document_metadata.get('title', 'Untitled Document')
+        author = document_metadata.get('author', 'Unknown Author')
+        doc_type = document_metadata.get('document_type', 'Document')
+        page_count = document_metadata.get('page_count', 'Unknown')
+        topics = document_metadata.get('topics', [])
+        
+        context += f"Title: {title}\n"
+        context += f"Author: {author}\n"
+        context += f"Type: {doc_type}\n"
+        context += f"Pages: {page_count}\n"
+        
+        if topics:
+            context += f"Topics: {', '.join(topics)}\n"
+        
+        context += "\n"
+    
+    # Add entity information if available
+    entities_found = document_metadata.get('entities_found', []) if document_metadata else []
+    if entities_found:
+        context += "# Relevant Entities\n"
+        for entity in entities_found:
+            context += f"- {entity}\n"
+        context += "\n"
+    
+    # Format chunks into a context string with structural information
+    context += "# Relevant Document Sections\n\n"
+    
+    for i, chunk in enumerate(chunks):
+        content = chunk.get("content", "")
+        page_number = chunk.get("page_number", "Unknown")
+        section_path = chunk.get("section_path", [])
+        content_type = chunk.get("content_type", "text")
+        
+        # Format section path for better context
+        section_info = " > ".join(section_path) if section_path else "Main Content"
+        
+        # Add structural indicators
+        if content_type == "table":
+            content_type_label = "TABLE"
+        elif content_type == "figure":
+            content_type_label = "FIGURE"
+        elif content_type == "list":
+            content_type_label = "LIST"
+        else:
+            content_type_label = "TEXT"
+        
+        # Add relevance scores for debugging/transparency
+        semantic_score = chunk.get("semantic_similarity", 0)
+        entity_score = chunk.get("entity_relevance", 0)
+        structural_score = chunk.get("structural_relevance", 0)
+        
+        # Format the chunk header
+        context += f"## Section {i+1}: {section_info} (Page {page_number}, {content_type_label})\n"
+        
+        # Add the content
+        context += f"{content}\n\n"
+        
+        # Add relevance information (optional - can be removed in production)
+        # context += f"Relevance: Semantic: {semantic_score:.2f}, Entity: {entity_score:.2f}, Structural: {structural_score:.2f}\n\n"
+    
+    return context
+
+async def generate_document_chat_response(query, context, document_metadata=None, api_key=None):
+    """
+    Generate a response specifically for document chat mode with enhanced context.
+    
+    Args:
+        query: The user's query
+        context: The enhanced document context from build_document_chat_context
+        document_metadata: Additional document metadata
+        api_key: Optional API key
+        
+    Returns:
+        The LLM response
+    """
+    # Create document-specific system prompt
+    title = document_metadata.get('title', 'the document') if document_metadata else 'the document'
+    
+    system_prompt = f"""You are an AI assistant specialized in answering questions about documents.
+You are currently helping with questions about the document titled "{title}".
+Answer the user's question based ONLY on the information provided in the context below.
+If the answer cannot be found in the context, acknowledge this limitation and suggest what information might be needed.
+Provide specific page numbers and section references when possible to help the user locate information in the document.
+"""
+
+    # Combine system prompt with context and query
+    prompt = f"""{system_prompt}
+
+Context:
+{context}
+
+Question: {query}
+
+Answer:"""
+    
+    return await query_llm(prompt, api_key)

@@ -70,6 +70,7 @@ export async function queryDocumentWithLLM(
   response: string;
   context: string;
   mode: string;
+  search_results?: any;
 } | Response> {
   const PYTHON_BACKEND_URL = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000';
 
@@ -108,6 +109,16 @@ export async function queryDocumentWithLLM(
   }
 
   const result = await response.json();
+  
+  // Log the enhanced search results if available
+  if (result.search_results && chat_mode === 'document') {
+    console.log('Enhanced document chat search results:', {
+      total: result.search_results.total,
+      entities_found: result.search_results.entities_found,
+      execution_time: result.search_results.execution_time
+    });
+  }
+  
   return result;
 }
 

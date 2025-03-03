@@ -15,8 +15,8 @@ interface ChatModeSelectorProps {
 const modes = [
   {
     id: 'document',
-    name: 'Document Chat',
-    description: 'Chat with your documents',
+    name: 'Enhanced Document Chat',
+    description: 'Smart chat with multi-layer document understanding',
     icon: FileText,
   },
   {
