@@ -62,3 +62,7 @@ python-backend/config.py
 **/__pycache__/
 *.pyc
 repomix-output.txt
+python-backend/__pycache__/search.cpython-311.pyc
+python-backend/.env
+python-backend/__pycache__/api.cpython-311.pyc
+python-backend/__pycache__/llm_helper.cpython-311.pyc
