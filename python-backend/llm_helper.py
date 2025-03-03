@@ -54,33 +54,12 @@ def build_context(chunks, query):
     if not chunks:
         return "No relevant information found in the document."
     
-    # Get document info from the first chunk
-    document_info = {}
-    if chunks and isinstance(chunks[0], dict):
-        # Try to get document info from the first chunk
-        if 'document_info' in chunks[0]:
-            document_info = chunks[0]['document_info']
-        
-        # If we have a document title, use it
-        document_title = chunks[0].get('document_title', 
-                         chunks[0].get('document_info', {}).get('title', 'Document'))
-        
-        # Format document info
-        doc_info_str = f"Document Title: {document_title}\n"
-        if document_info.get('author'):
-            doc_info_str += f"Author: {document_info.get('author')}\n"
-        if document_info.get('document_type'):
-            doc_info_str += f"Document Type: {document_info.get('document_type')}\n"
-    else:
-        doc_info_str = "Document information not available.\n"
-    
     # Format chunks into a context string
-    context = f"Here is information about the document:\n\n{doc_info_str}\n"
-    context += "Relevant sections from the document:\n\n"
+    context = "Here are the relevant sections from the document:\n\n"
     
     for i, chunk in enumerate(chunks):
         content = chunk.get("content", "")
-        document_title = chunk.get("document_title", chunk.get('document_info', {}).get('title', "Document"))
+        document_title = chunk.get("document_title", "Document")
         page_number = chunk.get("page_number", "Unknown")
         
         context += f"[Section {i+1} from {document_title}, Page {page_number}]\n{content}\n\n"
@@ -96,42 +75,18 @@ async def generate_response_from_messages(messages, api_key=None):
   return await query_llm(prompt, api_key)
 
 async def generate_response_with_context(query, context, api_key=None):
-    """Generate a response with document context."""
-    # Check if this is a document overview question
-    overview_patterns = [
-        "what is this document about", 
-        "what is this file about", 
-        "what's this document about",
-        "what's this file about",
-        "summarize this document",
-        "summarize this file",
-        "give me an overview",
-        "tell me about this document",
-        "tell me about this file"
-    ]
+    """Generate a response using the LLM with document context."""
+    prompt = f"""Please answer the following question based on the provided document context. 
+If the answer cannot be found in the context, please say so.
+
+Context:
+{context}
+
+Question: {query}
+
+Answer:"""
     
-    is_overview_question = any(pattern in query.lower() for pattern in overview_patterns)
-    
-    if is_overview_question:
-        system_prompt = """You are a helpful assistant that provides information about documents.
-When asked about what a document is about, provide a comprehensive overview based on the document information and content provided.
-Focus on explaining the main topics, purpose, and key information from the document.
-If the document appears to be a specific type (report, analysis, etc.), mention that in your response.
-"""
-    else:
-        system_prompt = """You are a helpful assistant that answers questions based on document content.
-Use the provided document context to answer the user's question accurately and thoroughly.
-If the answer is not in the provided context, say so clearly rather than making up information.
-"""
-    
-    prompt = f"{system_prompt}\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:"
-    
-    try:
-        response = await query_llm(prompt, api_key)
-        return response
-    except Exception as e:
-        print(f"Error generating response with context: {e}")
-        return "I'm sorry, I encountered an error while generating a response based on the document."
+    return await query_llm(prompt, api_key)
 
 async def generate_response(query, api_key=None):
     """Generate a response for general chat without document context."""
