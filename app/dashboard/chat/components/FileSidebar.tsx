@@ -15,6 +15,17 @@ type FileAttachment = {
   name: string;
 };
 
+type DocumentInfo = {
+  id: string;
+  title: string;
+  author: string;
+  creation_date: string | null;
+  page_count: number;
+  file_size: number;
+  document_type: string;
+  filename: string;
+};
+
 interface FileSidebarProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -30,7 +41,7 @@ export function FileSidebar({
   attachedFiles,
   onRemoveFile
 }: FileSidebarProps) {
-  const [availableFiles, setAvailableFiles] = useState<FileAttachment[]>([]);
+  const [availableFiles, setAvailableFiles] = useState<DocumentInfo[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -48,11 +59,7 @@ export function FileSidebar({
         setAvailableFiles([]);
         return;
       }
-      const files = data.files.map((file: any) => ({
-        id: file.id,
-        name: file.original_filename || file.filename,
-      }));
-      setAvailableFiles(files);
+      setAvailableFiles(data.files);
     } catch (error) {
       console.error('Error fetching files:', error);
       setAvailableFiles([]);
@@ -106,9 +113,50 @@ export function FileSidebar({
     setIsCompact(!isCompact);
   };
 
+  // Format file size to human-readable format
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  // Get display name for a file
+  const getFileDisplayName = (file: DocumentInfo) => {
+    return file.title || file.filename;
+  };
+
+  // Get file details for display
+  const getFileDetails = (file: DocumentInfo) => {
+    const details = [];
+    
+    // Add author if available
+    if (file.author) details.push(file.author);
+    
+    // Add page count if available
+    if (file.page_count) details.push(`${file.page_count} pages`);
+    
+    // Add file size if available
+    if (file.file_size) details.push(formatFileSize(file.file_size));
+    
+    // Add document type if available
+    if (file.document_type) details.push(file.document_type.toUpperCase());
+    
+    return details.join(' • ');
+  };
+
   const filteredFiles = availableFiles.filter(file => 
-    file.name.toLowerCase().includes(searchQuery.toLowerCase())
+    (file.title?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+    (file.filename?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+    (file.author?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   );
+
+  // Find document info for attached files
+  const getAttachedFileInfo = (fileId: string) => {
+    const fileInfo = availableFiles.find(file => file.id === fileId);
+    return fileInfo ? getFileDisplayName(fileInfo) : 'Unknown file';
+  };
 
   return (
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
@@ -169,7 +217,7 @@ export function FileSidebar({
                   >
                     <div className="flex items-center gap-2 truncate">
                       <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                      <span className="truncate">{file.name}</span>
+                      <span className="truncate">{getAttachedFileInfo(file.id)}</span>
                     </div>
                     <Button
                       variant="ghost"
@@ -196,18 +244,29 @@ export function FileSidebar({
                 {filteredFiles.map(file => (
                   <div 
                     key={file.id} 
-                    className={`flex items-center py-1 px-2 rounded-md text-sm hover:bg-muted cursor-pointer ${
+                    className={`flex flex-col py-1 px-2 rounded-md text-sm hover:bg-muted cursor-pointer ${
                       isCompact ? 'h-7 overflow-hidden' : ''
                     }`}
                     onClick={() => {
-                      onAttachFile(file);
+                      onAttachFile({
+                        id: file.id,
+                        name: getFileDisplayName(file)
+                      });
                       if (!attachedFiles.some(f => f.id === file.id)) {
                         setSearchQuery('');
                       }
                     }}
+                    title={file.filename}
                   >
-                    <FileText className="h-4 w-4 text-muted-foreground mr-2 flex-shrink-0" />
-                    <span className="truncate">{file.name}</span>
+                    <div className="flex items-center">
+                      <FileText className="h-4 w-4 text-muted-foreground mr-2 flex-shrink-0" />
+                      <span className="truncate font-medium">{getFileDisplayName(file)}</span>
+                    </div>
+                    {!isCompact && (
+                      <div className="text-xs text-muted-foreground ml-6 mt-0.5">
+                        {getFileDetails(file)}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -8,6 +8,9 @@ package-lock.json
 /.pnp
 .pnp.js
 
+*.env
+*.pyc
+
 *.pdf
 # testing
 /coverage
