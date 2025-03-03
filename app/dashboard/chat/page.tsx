@@ -4,13 +4,8 @@ import { useRef, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@ai-sdk/react';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { ChatModeSelector } from './components/ChatModeSelector';
+import { FileSidebar } from './components/FileSidebar';
 
 type FileAttachment = {
   id: string;
@@ -19,9 +14,7 @@ type FileAttachment = {
 
 export default function ChatPage() {
   const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [availableFiles, setAvailableFiles] = useState<FileAttachment[]>([]);
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [isFileSidebarOpen, setIsFileSidebarOpen] = useState(false);
   const [chatMode, setChatMode] = useState<'document' | 'general' | 'search' | 'advanced'>('general');
   const [usePythonBackend, setUsePythonBackend] = useState<boolean>(false);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
@@ -60,44 +53,27 @@ export default function ChatPage() {
     console.log('isLoading:', isLoading);
   }, [messages, isLoading]);
 
-  const fetchAvailableFiles = async () => {
-    setIsLoadingFiles(true);
-    try {
-      const response = await fetch('/api/files');
-      if (!response.ok) throw new Error('Failed to fetch files');
-      const data = await response.json();
-      if (!data?.files) {
-        setAvailableFiles([]);
-        return;
-      }
-      const files = data.files.map((file: any) => ({
-        id: file.id,
-        name: file.original_filename || file.filename,
-      }));
-      setAvailableFiles(files);
-    } catch (error) {
-      console.error('Error fetching files:', error);
-      setAvailableFiles([]);
-    } finally {
-      setIsLoadingFiles(false);
-    }
-  };
-
   const handleAttachFile = (file: FileAttachment) => {
     if (!attachedFiles.some(f => f.id === file.id)) {
       setAttachedFiles([...attachedFiles, file]);
     }
-    setIsDialogOpen(false);
   };
 
   const handleRemoveFile = (fileId: string) => {
     setAttachedFiles(attachedFiles.filter(file => file.id !== fileId));
   };
 
+  // Set chat mode to document if files are attached
+  useEffect(() => {
+    if (attachedFiles.length > 0 && chatMode !== 'document') {
+      setChatMode('document');
+    }
+  }, [attachedFiles, chatMode]);
+
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
       <div className="w-full max-w-3xl mx-auto flex flex-col h-full relative">
-        <div className={`flex-1 overflow-y-auto px-4 space-y-5 ${attachedFiles.length > 0 ? 'mb-[180px]' : 'mb-[140px]'}`}>
+        <div className="flex-1 overflow-y-auto px-4 space-y-5 mb-[140px] pt-4">
           {messages.map((message) => (
             <div
               key={message.id}
@@ -131,29 +107,23 @@ export default function ChatPage() {
           )}
         </div>
 
-        {attachedFiles.length > 0 && (
-          <div className="px-4 py-3 absolute bottom-[76px] left-0 right-0 bg-background border-t">
-            <div className="max-w-3xl mx-auto flex flex-wrap gap-2">
-              {attachedFiles.map(file => (
-                <div key={file.id} className="bg-muted px-3 py-1 rounded-full text-sm flex items-center gap-2">
-                  <span className="truncate max-w-xs">{file.name}</span>
-                  <button
-                    type="button"
-                    className="rounded-full p-1 hover:bg-muted/80"
-                    onClick={() => handleRemoveFile(file.id)}
-                    aria-label="Remove file"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M9 3L3 9M3 3L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         <div className="px-4 pt-2 pb-4 absolute bottom-0 left-0 right-0 bg-background border-t">
+          {attachedFiles.length > 0 && (
+            <div className="max-w-3xl mx-auto mb-2 flex items-center">
+              <div className="text-xs text-muted-foreground">
+                {attachedFiles.length} file{attachedFiles.length !== 1 ? 's' : ''} attached
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 text-xs ml-2"
+                onClick={() => setIsFileSidebarOpen(true)}
+              >
+                Manage
+              </Button>
+            </div>
+          )}
+          
           <form onSubmit={handleSubmit} className="relative max-w-3xl mx-auto flex items-center gap-2">
             <ChatModeSelector 
               currentMode={chatMode}
@@ -200,10 +170,7 @@ export default function ChatPage() {
                 <button 
                   type="button" 
                   className="absolute right-2 bottom-[10px] p-1.5 rounded-full hover:bg-muted transition-colors"
-                  onClick={() => {
-                    setIsDialogOpen(true);
-                    fetchAvailableFiles();
-                  }}
+                  onClick={() => setIsFileSidebarOpen(true)}
                   aria-label="Attach files"
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -229,46 +196,13 @@ export default function ChatPage() {
           </form>
         </div>
 
-        {isDialogOpen && (
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Attach PDF Files</DialogTitle>
-              </DialogHeader>
-              <div className="py-4 max-h-[400px] overflow-y-auto">
-                {isLoadingFiles ? (
-                  <div className="flex justify-center items-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                  </div>
-                ) : availableFiles.length > 0 ? (
-                  <div className="space-y-2">
-                    {availableFiles.map(file => (
-                      <div 
-                        key={file.id} 
-                        className="flex items-center p-3 rounded-lg border border-border hover:bg-muted cursor-pointer transition-colors"
-                        onClick={() => handleAttachFile(file)}
-                      >
-                        <div className="mr-3 text-muted-foreground">
-                          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M17.5 15.8333V17.5H2.5V15.8333H17.5ZM4.16667 3.33333H15.8333V10.8333H4.16667V3.33333ZM5.83333 5V9.16667H14.1667V5H5.83333ZM8.33333 11.6667H11.6667V14.1667H8.33333V11.6667Z" fill="currentColor"/>
-                          </svg>
-                        </div>
-                        <div className="font-medium truncate">{file.name}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <svg className="mx-auto" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM11 15H13V17H11V15ZM11 7H13V13H11V7Z" fill="currentColor"/>
-                    </svg>
-                    <p>No files available. Please upload some PDFs first.</p>
-                  </div>
-                )}
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
+        <FileSidebar
+          isOpen={isFileSidebarOpen}
+          onOpenChange={setIsFileSidebarOpen}
+          onAttachFile={handleAttachFile}
+          attachedFiles={attachedFiles}
+          onRemoveFile={handleRemoveFile}
+        />
       </div>
     </div>
   );
