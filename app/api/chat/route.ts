@@ -14,16 +14,22 @@ export async function POST(req: NextRequest) {
     // Document mode: Proxy to Python backend
     if (fileIds && fileIds.length > 0) {
       console.log('Document mode: Calling Python backend with streaming');
+      console.log('Using file IDs:', fileIds);
+      
       const lastUserMessage = messages[messages.length - 1];
       if (!lastUserMessage || lastUserMessage.role !== 'user') throw new Error('No user message found');
       
       // Log the actual message being sent to ensure it's correct
       console.log('Document mode: Using message:', lastUserMessage.content);
       
+      // Get the current file ID - make sure we're using the most recently selected file
+      const currentFileId = fileIds[0];
+      console.log('Using document ID:', currentFileId);
+      
       // Call the Python backend with streaming enabled
       const response = await queryDocumentWithLLM(
         lastUserMessage.content, 
-        fileIds[0], 
+        currentFileId, 
         'document',
         true // Enable streaming
       );

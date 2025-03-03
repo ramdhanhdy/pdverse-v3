@@ -329,42 +329,86 @@ async def query_document(request: Request):
         
         # Different handling based on chat mode
         if chat_mode == "document":
-            # Existing document chat logic
+            # Document chat logic - only use chunks from the specific document
             try:
-                search_results = hybrid_search(query, limit=5, document_id=document_id)
+                # Get document chunks directly from the database instead of using hybrid search
+                from database import get_db_session
+                from db import DocumentChunk, Document
+                from sqlalchemy import func
+                
+                session = get_db_session()
+                
+                # Verify the document exists
+                if not document_id:
+                    raise ValueError("Document ID is required for document mode")
+                
+                logger.info(f"Fetching chunks for document: {document_id}")
+                
+                # First get the document info
+                document = session.query(Document).filter(Document.id == document_id).first()
+                if not document:
+                    raise ValueError(f"Document with ID {document_id} not found")
+                
+                document_title = document.title or "Untitled Document"
+                logger.info(f"Found document: {document_title} (ID: {document_id})")
+                
+                # Get chunks from the specific document
+                chunks_query = session.query(DocumentChunk).filter(
+                    DocumentChunk.document_id == document_id
+                ).order_by(
+                    DocumentChunk.page_number,
+                    DocumentChunk.importance.desc()
+                ).limit(10).all()
+                
+                logger.info(f"Retrieved {len(chunks_query)} chunks from document {document_id}")
+                
+                # Convert to the same format as search results
+                chunks = []
+                for chunk in chunks_query:
+                    chunks.append({
+                        'chunk_id': str(chunk.id),
+                        'document_id': str(chunk.document_id),
+                        'page_number': chunk.page_number,
+                        'content': chunk.content,
+                        'section_path': chunk.section_path,
+                        'importance': float(chunk.importance),
+                        'document_title': document_title,
+                        'document_info': {
+                            'title': document_title,
+                            'author': document.author if document.author else 'Unknown',
+                            'document_type': document.document_type if document.document_type else 'Unknown'
+                        }
+                    })
+                
+                logger.info(f"Found {len(chunks)} chunks for document {document_id}")
+                context = build_context(chunks, query)
+                logger.info(f"Built context with {len(context)} characters")
+            except Exception as doc_error:
+                logger.error(f"Error in document mode: {doc_error}")
+                logger.error(traceback.format_exc())
+                
+                # Provide more specific error messages
+                if "Document with ID" in str(doc_error) and "not found" in str(doc_error):
+                    context = f"Error: The document with ID {document_id} could not be found. Please check if the document exists or try uploading it again."
+                elif not document_id:
+                    context = "Error: No document ID was provided. Please select a document to chat with."
+                else:
+                    context = f"Error retrieving document context: {str(doc_error)}. Please try again or select a different document."
+                
+                chunks = []
+        
+        elif chat_mode == "search":
+            # Search mode - use hybrid search across all documents or filtered by document_id
+            try:
+                search_results = hybrid_search(query, limit=10, document_id=document_id)
                 chunks = search_results.get("results", [])
-                logger.info(f"Found {len(chunks)} chunks for document query")
+                logger.info(f"Found {len(chunks)} chunks for search query")
                 context = build_context(chunks, query)
             except Exception as search_error:
-                logger.error(f"Search error in document mode: {search_error}")
-                context = "Error retrieving document context. Proceeding with general response."
+                logger.error(f"Search error in search mode: {search_error}")
+                context = f"Error performing search: {str(search_error)}. Proceeding with general response."
                 chunks = []
-            
-            # Check if streaming is requested
-            if stream:
-                logger.info("Streaming response requested for document mode")
-                
-                # Create a streaming response
-                async def generate_stream():
-                    # Get the full response with context
-                    response = await generate_response_with_context(query, context, api_key)
-                    
-                    # Send the content directly as plain text without any JSON formatting
-                    # This will be compatible with streamProtocol: 'text' in the frontend
-                    yield response
-                    
-                return StreamingResponse(
-                    generate_stream(),
-                    media_type="text/plain",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive"
-                    }
-                )
-            
-            # Non-streaming response
-            response = await generate_response_with_context(query, context, api_key)
-            
+        
         elif chat_mode == "general":
             # General chat without document context
             if stream:
@@ -390,46 +434,11 @@ async def query_document(request: Request):
             # Non-streaming response
             response = await generate_response(query, api_key)
             context = ""
-            
-        elif chat_mode == "search":
-            # Search mode
-            try:
-                search_results = hybrid_search(query, limit=10)
-                chunks = search_results.get("results", [])
-                logger.info(f"Found {len(chunks)} chunks for search query")
-                context = build_context(chunks, query)
-                
-                if stream:
-                    logger.info("Streaming response requested for search mode")
-                    
-                    # Create a streaming response
-                    async def generate_stream():
-                        # Format search results
-                        response = format_search_results(chunks, query)
-                        
-                        # Send the content directly as plain text
-                        yield response
-                        
-                    return StreamingResponse(
-                        generate_stream(),
-                        media_type="text/plain",
-                        headers={
-                            "Cache-Control": "no-cache",
-                            "Connection": "keep-alive"
-                        }
-                    )
-                
-                response = format_search_results(chunks, query)
-            except Exception as search_error:
-                logger.error(f"Search error in search mode: {search_error}")
-                response = "Sorry, I encountered an error while searching the documents."
-                context = ""
-                chunks = []
-            
+        
         elif chat_mode == "advanced":
             # Advanced document analysis
             try:
-                search_results = hybrid_search(query, limit=8, document_id=document_id)
+                search_results = hybrid_search(query, limit=8)
                 chunks = search_results.get("results", [])
                 logger.info(f"Found {len(chunks)} chunks for advanced analysis")
                 context = build_context(chunks, query)
@@ -455,13 +464,47 @@ async def query_document(request: Request):
                     )
                 
                 response = await generate_advanced_analysis(query, context, api_key)
-            except Exception as search_error:
-                logger.error(f"Search error in advanced mode: {search_error}")
-                context = "Error retrieving document context. Proceeding with general response."
+            except Exception as advanced_error:
+                logger.error(f"Advanced analysis error: {advanced_error}")
+                response = "Sorry, I encountered an error while performing advanced analysis."
+                context = ""
                 chunks = []
             
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported chat mode: {chat_mode}")
+            raise HTTPException(status_code=400, detail=f"Invalid chat mode: {chat_mode}")
+        
+        # Handle streaming for document and search modes
+        if chat_mode in ["document", "search"]:
+            # Check if streaming is requested
+            if stream:
+                logger.info(f"Streaming response requested for {chat_mode} mode")
+                
+                # Create a streaming response
+                async def generate_stream():
+                    # Get the appropriate response based on mode
+                    if chat_mode == "document":
+                        response = await generate_response_with_context(query, context, api_key)
+                    elif chat_mode == "search":
+                        response = format_search_results(chunks, query)
+                    
+                    # Send the content directly as plain text without any JSON formatting
+                    # This will be compatible with streamProtocol: 'text' in the frontend
+                    yield response
+                    
+                return StreamingResponse(
+                    generate_stream(),
+                    media_type="text/plain",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive"
+                    }
+                )
+            
+            # Non-streaming response
+            if chat_mode == "document":
+                response = await generate_response_with_context(query, context, api_key)
+            elif chat_mode == "search":
+                response = format_search_results(chunks, query)
         
         logger.info(f"Successfully generated response for query in {chat_mode} mode")
         return {

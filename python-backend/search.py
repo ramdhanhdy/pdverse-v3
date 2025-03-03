@@ -274,7 +274,9 @@ def hybrid_search(query, limit=10, offset=0, document_id=None, vector_weight=0.6
 
         # Use raw SQL with join to documents table
         search_terms = " | ".join(term for term in query.split() if len(term) > 2) or query
-        query_sql = text("""
+        
+        # Base query
+        base_sql = """
             SELECT 
                 dc.id AS chunk_id,
                 dc.document_id,
@@ -290,23 +292,44 @@ def hybrid_search(query, limit=10, offset=0, document_id=None, vector_weight=0.6
                 d.document_type AS doc_type
             FROM document_chunks dc
             LEFT JOIN documents d ON dc.document_id = d.id
+        """
+        
+        # Add document_id filter if provided
+        if document_id:
+            print(f"Filtering by document_id: {document_id}")
+            base_sql += " WHERE dc.document_id = :document_id"
+            
+        # Add ordering and limit
+        base_sql += """
             ORDER BY combined_score DESC
             LIMIT :limit OFFSET :offset
-        """)
+        """
         
-        results = session.execute(
-            query_sql,
-            {
-                "query_embedding": str(query_embedding),
-                "search_terms": search_terms,
-                "vector_weight": vector_weight,
-                "text_weight": text_weight,
-                "limit": limit,
-                "offset": offset
-            }
-        ).fetchall()
+        # Prepare parameters
+        params = {
+            "query_embedding": str(query_embedding),
+            "search_terms": search_terms,
+            "vector_weight": vector_weight,
+            "text_weight": text_weight,
+            "limit": limit,
+            "offset": offset
+        }
+        
+        # Add document_id to params if provided
+        if document_id:
+            params["document_id"] = document_id
+        
+        # Execute query
+        query_sql = text(base_sql)
+        results = session.execute(query_sql, params).fetchall()
 
-        total_count = session.query(func.count(DocumentChunk.id)).scalar() or 0
+        # Get total count (with document filter if provided)
+        if document_id:
+            total_count = session.query(func.count(DocumentChunk.id)).filter(
+                DocumentChunk.document_id == document_id
+            ).scalar() or 0
+        else:
+            total_count = session.query(func.count(DocumentChunk.id)).scalar() or 0
 
         formatted_results = [
             {
