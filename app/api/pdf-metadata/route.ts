@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPdfMetadata } from "@/lib/db";
+import { getDocumentFromPythonBackend } from "@/lib/python-backend";
+import { getFileById } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,17 +14,23 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    // Get PDF metadata
-    const metadata = getPdfMetadata(fileId);
+    // Bypass SQLite check and use direct Python backend ID
+    const pythonBackendId = fileId; // Now using fileId directly as pythonBackendId
     
-    if (!metadata) {
+    try {
+      // Get the metadata from the Python backend
+      // We need to get the Python backend document ID from the file record
+      // This should be stored in the file record's metadata field
+      const metadata = await getDocumentFromPythonBackend(pythonBackendId);
+      
+      return NextResponse.json({ metadata });
+    } catch (backendError) {
+      console.error("Error fetching metadata from Python backend:", backendError);
       return NextResponse.json(
-        { error: "Metadata not found for this file" },
-        { status: 404 }
+        { error: "Failed to fetch metadata from Python backend" },
+        { status: 500 }
       );
     }
-    
-    return NextResponse.json({ metadata });
   } catch (error) {
     console.error("Error fetching PDF metadata:", error);
     return NextResponse.json(

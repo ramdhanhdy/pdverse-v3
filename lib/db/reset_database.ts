@@ -4,33 +4,38 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { addEnhancedMetadataFields } from './migrations/add_enhanced_metadata.js';
 
 // Get the current file path and directory
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
- * Resets the database by deleting the existing file and recreating it with the updated schema
+ * Resets the database by deleting the existing file and recreating it
  */
 export async function resetDatabase() {
   // Database file path
   const DATA_DIR = path.join(process.cwd(), 'data');
   const DB_PATH = path.join(DATA_DIR, 'pdverse.db');
   
-  // Close any existing database connections
-  try {
-    const tempDb = new Database(DB_PATH);
-    tempDb.close();
-  } catch (error) {
-    console.log('No existing database connection to close');
-  }
+  console.log(`Resetting database at ${DB_PATH}...`);
   
-  // Delete the existing database file if it exists
-  if (fs.existsSync(DB_PATH)) {
-    console.log(`Deleting existing database at ${DB_PATH}`);
-    fs.unlinkSync(DB_PATH);
-    console.log('Database file deleted successfully');
+  // Close any existing database connections and delete file in a single try/catch
+  try {
+    // Try to close any open connections
+    try {
+      const tempDb = new Database(DB_PATH);
+      tempDb.close();
+    } catch (e) {
+      // Ignore errors if no connection exists
+    }
+    
+    // Delete the existing database file if it exists
+    if (fs.existsSync(DB_PATH)) {
+      fs.unlinkSync(DB_PATH);
+    }
+  } catch (error) {
+    console.error(`Error cleaning up existing database: ${error.message}`);
+    // Continue anyway - we'll try to create a new one
   }
   
   // Ensure data directory exists
@@ -38,21 +43,18 @@ export async function resetDatabase() {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
   
-  console.log('Creating new database with updated schema...');
-  
   // Import the db module after deleting the file to ensure a fresh connection
+  // This will automatically initialize the database with all tables
   const { db } = await import('./index.js');
   
-  // Run the migration to add enhanced metadata fields
-  console.log('Running migration to add enhanced metadata fields...');
-  addEnhancedMetadataFields();
-  
-  console.log('Database reset complete with updated schema');
-  
+  console.log('Database reset complete!');
   return true;
 }
 
-// If this file is run directly, execute the reset
+// Execute the reset if this file is run directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  resetDatabase();
+  resetDatabase().catch(err => {
+    console.error('Database reset failed:', err);
+    process.exit(1);
+  });
 }

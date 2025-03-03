@@ -11,8 +11,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { searchDocumentsInPythonBackend } from '@/lib/python-backend';
+import { queryDocumentWithLLM } from 'd:/pdverse-v3/lib/python-backend';
+import { ChatModeSelector } from './components/ChatModeSelector';
 
-// Simple type for file attachments
+
 type FileAttachment = {
   id: string;
   name: string;
@@ -24,14 +27,38 @@ export default function ChatPage() {
   const [availableFiles, setAvailableFiles] = useState<FileAttachment[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [aiModel, setAiModel] = useState("GPT-4o");
+  const [chatMode, setChatMode] = useState<'document' | 'general' | 'search' | 'advanced'>('document');
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load AI model from settings
+  const { messages, input, handleInputChange, isLoading, append, setInput } = useChat({
+    api: '/api/chat',
+    body: {
+      fileIds: attachedFiles.map(file => file.id),
+      chatMode: chatMode
+    },
+    onResponse: async (response) => {
+      console.log('Raw response from useChat:', response.status);
+      const data = await response.json();
+      console.log('Parsed response:', data);
+      
+      // Only append if we're in general mode
+      if (chatMode === 'general' && data?.content) {
+        await append({
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: data.content,
+        });
+      }
+    },
+    onError: (error) => {
+      console.error('useChat error:', error);
+    },
+  });
+
   useEffect(() => {
     const loadAiModel = () => {
       try {
         const savedModel = localStorage.getItem("ai_model") || "gpt-4o";
-        // Convert model ID to display name
         const modelDisplayNames: Record<string, string> = {
           "gpt-4o": "GPT-4o",
           "gpt-4-turbo": "GPT-4 Turbo",
@@ -43,38 +70,23 @@ export default function ChatPage() {
         console.error("Error loading AI model setting:", error);
       }
     };
-
     loadAiModel();
   }, []);
 
-  // Initialize chat
-  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
-    api: '/api/chat',
-    body: {
-      fileIds: attachedFiles.map(file => file.id),
-    },
-  });
-
-  // Fetch available files for the file picker
   const fetchAvailableFiles = async () => {
     setIsLoadingFiles(true);
     try {
       const response = await fetch("/api/files");
       if (!response.ok) throw new Error("Failed to fetch files");
       const data = await response.json();
-      
-      // Handle empty response or no files
-      if (!data || !data.files || data.files.length === 0) {
+      if (!data?.files) {
         setAvailableFiles([]);
         return;
       }
-      
-      // Map files to a simpler format
       const files = data.files.map((file: any) => ({
         id: file.id,
         name: file.original_filename || file.filename
       }));
-      
       setAvailableFiles(files);
     } catch (error) {
       console.error("Error fetching files:", error);
@@ -84,7 +96,6 @@ export default function ChatPage() {
     }
   };
 
-  // Handle attaching a file
   const handleAttachFile = (file: FileAttachment) => {
     if (!attachedFiles.some(f => f.id === file.id)) {
       setAttachedFiles([...attachedFiles, file]);
@@ -92,27 +103,78 @@ export default function ChatPage() {
     setIsDialogOpen(false);
   };
 
-  // Handle removing an attached file
   const handleRemoveFile = (fileId: string) => {
     setAttachedFiles(attachedFiles.filter(file => file.id !== fileId));
   };
 
-  // Custom submit handler
-  const handleMessageSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleMessageSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    handleSubmit(e);
-    // Reset text area height
-    if (textAreaRef.current) {
-      textAreaRef.current.style.height = 'auto';
+    if (isLoading || !input.trim()) return;
+
+    const userMessage = input;
+    setInput(''); // Clear input immediately
+
+    // Add user message
+    await append({
+      role: 'user',
+      content: userMessage,
+    });
+
+    try {
+      if (attachedFiles.length > 0) {
+        // Document mode: Direct API call
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messages: [...messages, { role: 'user', content: userMessage }],
+            fileIds: attachedFiles.map(file => file.id),
+            chatMode: 'document'
+          }),
+        });
+
+        const data = await response.json();
+        await append({
+          role: 'assistant',
+          content: data.content,
+        });
+      } else {
+        // General mode: Let useChat handle it
+        await append({
+          role: 'user',
+          content: userMessage,
+        });
+      }
+    } catch (error) {
+      console.error('Submit error:', error);
+      await append({
+        role: 'assistant',
+        content: "Sorry, I encountered an error processing your request.",
+      });
     }
+  };
+
+  const formatSearchResults = (searchResults: any) => {
+    if (!searchResults || !searchResults.results || searchResults.results.length === 0) {
+      return "No results found for your query.";
+    }
+    let formattedResponse = `### Search Results\n\nHere are the top results for your query:\n\n`;
+    searchResults.results.forEach((result: any, index: number) => {
+      const documentTitle = result.document_title || 'Untitled Document';
+      const content = result.content || '';
+      formattedResponse += `**Result ${index + 1}** (from ${documentTitle})\n`;
+      formattedResponse += `${content.substring(0, 300)}${content.length > 300 ? '...' : ''}\n\n`;
+    });
+    formattedResponse += `Found ${searchResults.total} results in total.`;
+    return formattedResponse;
   };
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
-      {/* Container with max-width for better readability */}
       <div className="w-full max-w-3xl mx-auto flex flex-col h-full relative">
-        {/* Messages display - smaller text size */}
-        <div className={`flex-1 overflow-y-auto px-4 pt-4 space-y-5 ${attachedFiles.length > 0 ? 'mb-[180px]' : 'mb-[140px]'}`}>
+        <div className={`flex-1 overflow-y-auto px-4 space-y-5 ${attachedFiles.length > 0 ? 'mb-[180px]' : 'mb-[140px]'}`}>
           {messages.map(message => (
             <div 
               key={message.id} 
@@ -139,27 +201,25 @@ export default function ChatPage() {
           ))}
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-12">
-              <div className="mb-4">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M8 9H16M8 13H14M18 15L21 18V4C21 3.46957 20.7893 2.96086 20.4142 2.58579C20.0391 2.21071 19.5304 2 19 2H5C4.46957 2 3.96086 2.21071 3.58579 2.58579C3.21071 2.96086 3 3.46957 3 4V18C3 18.5304 3.21071 19.0391 3.58579 19.4142C3.96086 19.7893 4.46957 20 5 20H18Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </div>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 9H16M8 13H14M18 15L21 18V4C21 3.46957 20.7893 2.96086 20.4142 2.58579C20.0391 2.21071 19.5304 2 19 2H5C4.46957 2 3.96086 2.21071 3.58579 2.58579C3.21071 2.96086 3 3.46957 3 4V18C3 18.5304 3.21071 19.0391 3.58579 19.4142C3.96086 19.7893 4.46957 20 5 20H18Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
               <p className="text-lg">Welcome to PDVerse Chat</p>
               <p className="text-sm text-muted-foreground mt-2">Ask any question or attach PDFs to ask about your documents</p>
             </div>
           )}
         </div>
         
-        {/* Attached files display */}
         {attachedFiles.length > 0 && (
           <div className="px-4 py-3 absolute bottom-[76px] left-0 right-0 bg-background border-t">
             <div className="max-w-3xl mx-auto flex flex-wrap gap-2">
               {attachedFiles.map(file => (
                 <div key={file.id} className="bg-muted px-3 py-1 rounded-full text-sm flex items-center gap-2">
                   <span className="truncate max-w-xs">{file.name}</span>
-                  <button 
+                  <button
+                    type="button"
+                    className="rounded-full p-1 hover:bg-muted/80"
                     onClick={() => handleRemoveFile(file.id)}
-                    className="text-muted-foreground hover:text-destructive"
                     aria-label="Remove file"
                   >
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -172,41 +232,51 @@ export default function ChatPage() {
           </div>
         )}
         
-        {/* Input form */}
         <div className="px-4 pt-2 pb-4 absolute bottom-0 left-0 right-0 bg-background border-t">
           <form onSubmit={handleMessageSubmit} className="relative max-w-3xl mx-auto flex items-center gap-2">
+            <ChatModeSelector 
+              currentMode={chatMode}
+              onModeChange={(mode) => {
+                setChatMode(mode);
+                if (mode !== 'document') setAttachedFiles([]);
+              }}
+              compact={true}
+            />
             <div className="relative shadow-sm rounded-lg border border-input flex-1">
               <Textarea
                 ref={textAreaRef}
                 value={input}
                 onChange={handleInputChange}
-                placeholder="Ask any question or ask about attached PDFs..."
+                placeholder={`Ask a question in ${chatMode === 'document' ? 'Document Chat' : 
+                              chatMode === 'general' ? 'General Chat' : 
+                              chatMode === 'search' ? 'Search Mode' : 'Advanced Analysis'} mode...`}
                 className="w-full p-3 pr-12 min-h-[50px] max-h-[150px] resize-none rounded-lg border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    handleSubmit(e as any);
+                    const form = e.currentTarget.closest('form');
+                    if (form && !isLoading && input.trim()) {
+                      form.requestSubmit();
+                    }
                   }
                 }}
               />
-              
-              {/* File attachment button */}
-              <button 
-                type="button" 
-                className="absolute right-2 bottom-[10px] p-1.5 rounded-full hover:bg-muted transition-colors"
-                onClick={() => {
-                  setIsDialogOpen(true);
-                  fetchAvailableFiles();
-                }}
-                aria-label="Attach files"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </button>
+              {chatMode === 'document' && (
+                <button 
+                  type="button" 
+                  className="absolute right-2 bottom-[10px] p-1.5 rounded-full hover:bg-muted transition-colors"
+                  onClick={() => {
+                    setIsDialogOpen(true);
+                    fetchAvailableFiles();
+                  }}
+                  aria-label="Attach files"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              )}
             </div>
-            
-            {/* Send button */}
             <Button 
               type="submit" 
               disabled={isLoading || !input.trim()}
@@ -223,8 +293,7 @@ export default function ChatPage() {
             </Button>
           </form>
         </div>
-      
-        {/* File selection dialog */}
+        
         {isDialogOpen && (
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogContent className="sm:max-w-md">
@@ -255,11 +324,9 @@ export default function ChatPage() {
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
-                    <div className="mb-2">
-                      <svg className="mx-auto" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM11 15H13V17H11V15ZM11 7H13V13H11V7Z" fill="currentColor"/>
-                      </svg>
-                    </div>
+                    <svg className="mx-auto" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM11 15H13V17H11V15ZM11 7H13V13H11V7Z" fill="currentColor"/>
+                    </svg>
                     <p>No files available. Please upload some PDFs first.</p>
                   </div>
                 )}

@@ -3,16 +3,17 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { formatBytes } from "@/lib/utils";
 import { toast } from "sonner";
 import { 
   ChevronLeft, ChevronRight, ZoomIn, ZoomOut, 
-  Download, Printer, Maximize, Search, List, Wand2
+  Download, Printer, Maximize, Search, List, Wand2,
+  Trash2
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { getDocumentFromPythonBackend } from "@/lib/python-backend";
 
 type FileDetails = {
   id: string;
@@ -45,6 +46,47 @@ type PdfMetadata = {
   updated_at: number;
 };
 
+const FileMetadataSection = ({ metadata }: { metadata: any }) => {
+  if (!metadata) return null;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Document Summary</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p>{metadata.summary || "No summary available"}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Classification</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div>
+            <span className="font-medium">Document Type:</span>
+            <span className="ml-2">{metadata.doc_type || "Unclassified"}</span>
+          </div>
+          <div>
+            <span className="font-medium">Key Topics:</span>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {(metadata.topics || []).map((topic: string) => (
+                <Badge key={topic} variant="outline">
+                  {topic}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Add other metadata sections as needed */}
+    </div>
+  );
+};
+
 export default function FileViewPage() {
   const params = useParams();
   const router = useRouter();
@@ -53,6 +95,7 @@ export default function FileViewPage() {
   const [pageNumber, setPageNumber] = useState(1);
   const [scale, setScale] = useState(1.0);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [showOutline, setShowOutline] = useState(false);
   const pdfContainerRef = useRef<HTMLDivElement>(null);
@@ -64,27 +107,70 @@ export default function FileViewPage() {
       
       try {
         setIsLoading(true);
-        const response = await fetch(`/api/files?id=${params.id}`);
         
-        if (!response.ok) {
-          throw new Error("Failed to fetch file details");
-        }
-        
-        const data = await response.json();
-        // Handle both response formats: { file: ... } or direct file object
-        const fileData = data.file || data;
-        setFile(fileData);
-        
-        // Fetch PDF metadata if available
-        if (fileData && fileData.id) {
-          try {
-            const metadataResponse = await fetch(`/api/pdf-metadata?fileId=${fileData.id}`);
-            if (metadataResponse.ok) {
-              const metadataData = await metadataResponse.json();
-              setMetadata(metadataData.metadata);
+        // Use Python backend to get document details
+        try {
+          const documentData = await getDocumentFromPythonBackend(params.id as string);
+          
+          // Convert Python backend format to our frontend format
+          const fileData: FileDetails = {
+            id: documentData.id,
+            filename: documentData.filename,
+            original_filename: documentData.title,
+            size: documentData.file_size,
+            path: '', // Not provided by Python backend
+            mimetype: 'application/pdf',
+            created_at: new Date(documentData.creation_date || Date.now()).getTime() / 1000,
+            updated_at: new Date(documentData.modification_date || Date.now()).getTime() / 1000,
+          };
+          
+          setFile(fileData);
+          
+          // Set metadata from Python backend
+          const metadataData: PdfMetadata = {
+            file_id: documentData.id,
+            title: documentData.title,
+            author: documentData.author,
+            summary: documentData.summary,
+            page_count: documentData.page_count,
+            creation_date: documentData.creation_date || undefined,
+            modification_date: documentData.modification_date || undefined,
+            document_type: documentData.doc_type,
+            topics: documentData.topics || [],
+            ai_enhanced: true,
+            needs_review: false,
+            created_at: new Date(documentData.creation_date || Date.now()).getTime() / 1000,
+            updated_at: new Date(documentData.modification_date || Date.now()).getTime() / 1000,
+          };
+          
+          setMetadata(metadataData);
+          
+        } catch (error) {
+          console.error("Error fetching document from Python backend:", error);
+          
+          // Fall back to the original method if Python backend fails
+          const response = await fetch(`/api/files?id=${params.id}`);
+          
+          if (!response.ok) {
+            throw new Error("Failed to fetch file details");
+          }
+          
+          const data = await response.json();
+          // Handle both response formats: { file: ... } or direct file object
+          const fileData = data.file || data;
+          setFile(fileData);
+          
+          // Fetch PDF metadata if available
+          if (fileData && fileData.id) {
+            try {
+              const metadataResponse = await fetch(`/api/pdf-metadata?fileId=${fileData.id}`);
+              if (metadataResponse.ok) {
+                const metadataData = await metadataResponse.json();
+                setMetadata(metadataData.metadata);
+              }
+            } catch (metadataError) {
+              console.error("Error fetching PDF metadata:", metadataError);
             }
-          } catch (metadataError) {
-            console.error("Error fetching PDF metadata:", metadataError);
           }
         }
       } catch (error) {
@@ -176,27 +262,25 @@ export default function FileViewPage() {
     document.body.removeChild(link);
   };
 
-  const deleteFile = async () => {
-    if (!file) return;
-    
-    if (!confirm("Are you sure you want to delete this file?")) {
+  const handleDeleteFile = async () => {
+    if (!file || !window.confirm("Are you sure you want to delete this file? This action cannot be undone.")) {
       return;
     }
     
     try {
-      const response = await fetch(`/api/files?id=${file.id}`, {
-        method: "DELETE",
-      });
+      setIsDeleting(true);
       
-      if (!response.ok) {
-        throw new Error("Failed to delete file");
-      }
+      const response = await fetch(`/api/files?id=${file.id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to delete file');
       
       toast.success("File deleted successfully");
       router.push("/dashboard/files");
     } catch (error) {
       console.error("Error deleting file:", error);
       toast.error("Failed to delete file. Please try again.");
+      setIsDeleting(false);
     }
   };
 
@@ -271,8 +355,8 @@ export default function FileViewPage() {
           <Button variant="outline" onClick={() => router.push("/dashboard/files")}>
             Back
           </Button>
-          <Button variant="destructive" onClick={deleteFile}>
-            Delete
+          <Button variant="destructive" onClick={handleDeleteFile} disabled={isDeleting}>
+            {isDeleting ? "Deleting..." : "Delete"}
           </Button>
         </div>
       </div>
@@ -392,145 +476,7 @@ export default function FileViewPage() {
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold">PDF Metadata</h2>
               </div>
-              <div className="space-y-4">
-                {metadata.title && (
-                  <div>
-                    <h3 className="text-sm font-medium">Title</h3>
-                    <p className="text-sm text-muted-foreground break-all">
-                      {metadata.title}
-                    </p>
-                  </div>
-                )}
-                {metadata.author && (
-                  <div>
-                    <h3 className="text-sm font-medium">Author</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.author}
-                    </p>
-                  </div>
-                )}
-                {metadata.subject && (
-                  <div>
-                    <h3 className="text-sm font-medium">Subject</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.subject}
-                    </p>
-                  </div>
-                )}
-                {metadata.keywords && (
-                  <div>
-                    <h3 className="text-sm font-medium">Keywords</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.keywords}
-                    </p>
-                  </div>
-                )}
-                {metadata.creator && (
-                  <div>
-                    <h3 className="text-sm font-medium">Creator</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.creator}
-                    </p>
-                  </div>
-                )}
-                {metadata.producer && (
-                  <div>
-                    <h3 className="text-sm font-medium">Producer</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.producer}
-                    </p>
-                  </div>
-                )}
-                {metadata.page_count && (
-                  <div>
-                    <h3 className="text-sm font-medium">Pages</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.page_count}
-                    </p>
-                  </div>
-                )}
-                {metadata.creation_date && (
-                  <div>
-                    <h3 className="text-sm font-medium">Creation Date</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {new Date(metadata.creation_date).toLocaleString()}
-                    </p>
-                  </div>
-                )}
-                {metadata.modification_date && (
-                  <div>
-                    <h3 className="text-sm font-medium">Modification Date</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {new Date(metadata.modification_date).toLocaleString()}
-                    </p>
-                  </div>
-                )}
-                {metadata.summary && (
-                  <div>
-                    <h3 className="text-sm font-medium">Summary</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.summary}
-                    </p>
-                  </div>
-                )}
-                {metadata.document_type && (
-                  <div>
-                    <h3 className="text-sm font-medium">Document Type</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.document_type}
-                    </p>
-                  </div>
-                )}
-                {metadata.topics && (
-                  <div>
-                    <h3 className="text-sm font-medium">Topics</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.topics}
-                    </p>
-                  </div>
-                )}
-                {metadata.ai_enhanced && (
-                  <div>
-                    <h3 className="text-sm font-medium">AI Enhanced</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.ai_enhanced ? 'Yes' : 'No'}
-                    </p>
-                  </div>
-                )}
-                {metadata.needs_review && (
-                  <div>
-                    <h3 className="text-sm font-medium">Needs Review</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {metadata.needs_review ? 'Yes' : 'No'}
-                    </p>
-                  </div>
-                )}
-                
-                <div className="mt-4 pt-4 border-t">
-                  <h3 className="text-sm font-medium mb-2">Missing Information</h3>
-                  <div className="space-y-1">
-                    {!metadata.title && (
-                      <p className="text-sm text-muted-foreground">• Title</p>
-                    )}
-                    {!metadata.author && (
-                      <p className="text-sm text-muted-foreground">• Author</p>
-                    )}
-                    {!metadata.summary && (
-                      <p className="text-sm text-muted-foreground">• Summary</p>
-                    )}
-                    {!metadata.document_type && (
-                      <p className="text-sm text-muted-foreground">• Document Type</p>
-                    )}
-                    {!metadata.topics && (
-                      <p className="text-sm text-muted-foreground">• Topics</p>
-                    )}
-                    {metadata.title && metadata.author && metadata.summary && 
-                     metadata.document_type && metadata.topics && (
-                      <p className="text-sm text-green-600">All metadata fields are complete!</p>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <FileMetadataSection metadata={metadata} />
             </Card>
           )}
         </div>

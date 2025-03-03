@@ -289,7 +289,7 @@ export default function DashboardLayout({
             <AnimatedSidebarButton
               isOpen={sidebarOpen}
               onClick={toggleSidebar}
-              className="lg:hidden"
+              // Remove the className prop as it's not defined in AnimatedSidebarButtonProps
             />
             <div className="flex-1 flex items-center justify-between">
               <Link
@@ -307,7 +307,7 @@ export default function DashboardLayout({
               <AnimatedSidebarButton
                 isOpen={sidebarOpen}
                 onClick={toggleSidebar}
-                className="hidden lg:flex"
+                // Remove the className prop here as well
               />
             </div>
             {children}

@@ -1,0 +1,7 @@
+- create virtual environment
+- python -m venv venv
+- source venv/bin/activate
+- pip install -r requirements.txt
+- # From your activated virtual environment
+- python -m ensurepip --default-pip
+- python -m spacy download xx_ent_wiki_sm

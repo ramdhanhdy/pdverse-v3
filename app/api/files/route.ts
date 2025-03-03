@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAllFiles, getFileById, deleteFile } from "@/lib/db";
-import fs from "fs";
-import path from "path";
+import { getDocumentsFromPythonBackend } from "@/lib/python-backend";
+
+const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000';
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,26 +9,44 @@ export async function GET(request: NextRequest) {
     const id = searchParams.get("id");
 
     if (id) {
-      // Get a specific file
-      const file = getFileById(id);
-      
-      if (!file) {
+      try {
+        // Use proper Python backend endpoint
+        const response = await fetch(
+          `${PYTHON_BACKEND_URL}/document/${id}`
+        );
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const document = await response.json();
+        return NextResponse.json(document);
+      } catch (error) {
+        console.error("Error fetching file:", error);
         return NextResponse.json(
-          { error: "File not found" },
+          { error: "File not found or backend error" },
           { status: 404 }
         );
       }
-      
-      return NextResponse.json({ file });
     }
     
-    // Get all files
-    const files = getAllFiles();
-    return NextResponse.json({ files });
+    // Get all files from Python backend
+    try {
+      const response = await fetch(`${PYTHON_BACKEND_URL}/documents`);
+      if (!response.ok) throw new Error("Failed to fetch documents");
+      const documents = await response.json();
+      return NextResponse.json({ files: documents });
+    } catch (error) {
+      console.error("Error fetching files from Python backend:", error);
+      return NextResponse.json(
+        { error: "Failed to fetch files from Python backend" },
+        { status: 500 }
+      );
+    }
   } catch (error) {
-    console.error("Error fetching files:", error);
+    console.error("Error in files API route:", error);
     return NextResponse.json(
-      { error: "Failed to fetch files" },
+      { error: "Failed to process request" },
       { status: 500 }
     );
   }
@@ -41,39 +59,26 @@ export async function DELETE(request: NextRequest) {
 
     if (!id) {
       return NextResponse.json(
-        { error: "File ID is required" },
+        { error: "Document ID is required" },
         { status: 400 }
       );
     }
 
-    // Get file details before deletion
-    const file = getFileById(id);
-    
-    if (!file) {
-      return NextResponse.json(
-        { error: "File not found" },
-        { status: 404 }
-      );
-    }
-
-    // Delete the file from the database
-    deleteFile(id);
-
-    // Delete the physical file
-    const filePath = path.join(process.cwd(), file.path.replace(/^\//, ''));
-    
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
-    return NextResponse.json({ 
-      success: true,
-      message: "File deleted successfully" 
+    const deleteResponse = await fetch(`${PYTHON_BACKEND_URL}/document/${id}`, {
+      method: 'DELETE'
     });
+
+    if (!deleteResponse.ok) {
+      const error = await deleteResponse.json();
+      throw new Error(error.detail || 'Failed to delete document');
+    }
+
+    return NextResponse.json({ success: true });
+
   } catch (error) {
-    console.error("Error deleting file:", error);
+    console.error("Error deleting document:", error);
     return NextResponse.json(
-      { error: "Failed to delete file" },
+      { error: error instanceof Error ? error.message : "Deletion failed" },
       { status: 500 }
     );
   }

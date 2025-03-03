@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search } from "lucide-react";
+import { searchDocumentsInPythonBackend } from "@/lib/python-backend";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type FileItem = {
   id: string;
@@ -23,7 +25,8 @@ type FileItem = {
 };
 
 export default function FilesPage() {
-  const [view, setView] = useState<"grid" | "list">("grid");
+  // Remove the unused view state
+  // const [view, setView] = useState<"grid" | "list">("grid");
   const [files, setFiles] = useState<FileItem[]>([]);
   const [filteredFiles, setFilteredFiles] = useState<FileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
@@ -44,36 +47,55 @@ export default function FilesPage() {
       id: string;
       filename: string;
       original_filename: string;
-    }
+      author: string;
+    },
+    score: number
   }>>([]);
   const [fulltextLoading, setFulltextLoading] = useState(false);
+  const [searchType, setSearchType] = useState<'hybrid' | 'vector' | 'fulltext'>('hybrid');
 
+  // Fetch files from API
+  // Update the useEffect hook that fetches files
   // Fetch files from API
   useEffect(() => {
     const fetchFiles = async () => {
+      setLoading(true);
       try {
-        setLoading(true);
-        const response = await fetch("/api/files");
+        const response = await fetch('/api/files');
         
         if (!response.ok) {
-          throw new Error(`Failed to fetch files: ${response.status} ${response.statusText}`);
+          throw new Error(`Failed to fetch files: ${response.statusText}`);
         }
         
         const data = await response.json();
-        console.log("Files API response:", data); // Debug log
-        setFiles(Array.isArray(data) ? data : data.files || []);
+        
+        // Handle the response format from the Python backend
+        const filesData = data.files || [];
+        
+        // Map the Python backend format to our frontend format
+        const mappedFiles = filesData.map((doc: any) => ({
+          id: doc.id,
+          filename: doc.filename || doc.title,
+          original_filename: doc.title,
+          size: doc.file_size || 0,
+          mimetype: 'application/pdf', // Assuming all files are PDFs
+          created_at: new Date(doc.creation_date || Date.now()).getTime() / 1000,
+          updated_at: new Date(doc.modification_date || Date.now()).getTime() / 1000,
+        }));
+        
+        setFiles(mappedFiles);
+        setFilteredFiles(mappedFiles); // Also set filtered files initially
       } catch (error) {
-        console.error("Error fetching files:", error);
-        toast.error("Failed to load files. Please try again.");
-        setFiles([]); // Set empty array to prevent undefined errors
+        console.error('Error fetching files:', error);
+        toast.error('Failed to load files. Please try again.');
       } finally {
         setLoading(false);
       }
     };
-
+    
+    // Call the fetchFiles function
     fetchFiles();
   }, []);
-
   useEffect(() => {
     if (!searchQuery) {
       setIsSearching(false);
@@ -150,6 +172,8 @@ export default function FilesPage() {
     }
   };
 
+  
+
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const query = e.target.value;
     setSearchQuery(query);
@@ -172,20 +196,40 @@ export default function FilesPage() {
     if (!searchQuery.trim()) {
       return;
     }
-    
+
     try {
       setFulltextLoading(true);
-      const response = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to search content: ${response.status} ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      setFulltextResults(data.results);
-    } catch (error) {
+      setFulltextResults([]);
+
+      const searchResults = await searchDocumentsInPythonBackend(searchQuery, {
+        limit: 20,
+        search_type: searchType, // Updated to snake_case
+        vector_weight: 0.7,
+        text_weight: 0.3,
+      });
+
+      const transformedResults = searchResults.results.map((result: any) => ({
+        chunk: {
+          id: result.chunk_id,
+          documentId: result.document_id,
+          pageNumber: result.page_number || 1,
+          chunkIndex: 0,
+          content: result.content,
+          contentType: 'text',
+        },
+        fileInfo: {
+          id: result.document_id,
+          filename: result.document_info?.title || 'Unknown',
+          original_filename: result.document_info?.title || 'Unknown',
+          author: result.document_info?.author || 'Unknown',
+        },
+        score: result.score,
+      }));
+
+      setFulltextResults(transformedResults);
+    } catch (error: any) {
       console.error("Error searching content:", error);
-      toast.error("Failed to search document content. Please try again.");
+      toast.error(`Failed to search document content: ${error.message}`);
     } finally {
       setFulltextLoading(false);
     }
@@ -239,20 +283,31 @@ export default function FilesPage() {
       <Tabs defaultValue="files" onValueChange={handleTabChange} className="mb-8">
         <TabsList className="mb-4">
           <TabsTrigger value="files">Files</TabsTrigger>
-          <TabsTrigger value="fulltext">Full-Text Search</TabsTrigger>
+          <TabsTrigger value="fulltext">Search</TabsTrigger>
         </TabsList>
 
         <div className="flex items-center mb-6 space-x-2">
           <div className="relative flex-1">
-            <Input
-              type="search"
-              placeholder={activeTab === "files" ? "Search files by name..." : "Search document content..."}
-              value={searchQuery}
-              onChange={handleSearchChange}
-              onKeyDown={handleSearchKeyDown}
-              className="pl-10"
-            />
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <div className="flex gap-2 mb-4">
+              <Input
+                type="text"
+                placeholder="Search documents..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                className="flex-1"
+              />
+              <Select value={searchType} onValueChange={(value: 'hybrid' | 'vector' | 'fulltext') => setSearchType(value)}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Search type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fulltext">Full-Text Search</SelectItem>
+                  <SelectItem value="vector">Semantic Search</SelectItem>
+                  <SelectItem value="hybrid">Hybrid Search</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           {activeTab === "fulltext" && (
             <Button 
@@ -451,9 +506,22 @@ export default function FilesPage() {
                           >
                             {result.fileInfo.original_filename}
                           </Link>
-                          <p className="text-xs text-muted-foreground">
-                            Page {result.chunk.pageNumber + 1}, Section {result.chunk.chunkIndex + 1}
-                          </p>
+                          <div className="flex justify-between items-center">
+                            <div className="flex gap-2">
+                              <p className="text-xs text-muted-foreground">
+                                {result.fileInfo.author} • Page {result.chunk.pageNumber + 1}
+                              </p>
+                              <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
+                                {searchType === 'hybrid' ? 'Hybrid' : 
+                                 searchType === 'vector' ? 'Semantic' : 'Text'}
+                              </span>
+                            </div>
+                            <div className="text-xs font-medium text-green-600">
+                              {typeof result.score === 'number' ? 
+                               `${(result.score * 100).toFixed(1)}% Match` : 
+                               result.score}
+                            </div>
+                          </div>
                         </div>
                         <p className="text-sm">
                           {highlightSearchTerm(result.chunk.content, searchQuery)}

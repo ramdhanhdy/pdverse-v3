@@ -23,7 +23,34 @@ type ChatSession = {
   }[];
 };
 
-// Mock function to get chat session (in a real app, this would be an API call)
+// Function to fetch chat session from API
+const fetchChatSession = async (id: string): Promise<ChatSession> => {
+  try {
+    const response = await fetch(`/api/chat/sessions/${id}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch chat session');
+    }
+    const data = await response.json();
+    
+    // Convert string timestamps to Date objects
+    const messages = data.messages.map((msg: any) => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp)
+    }));
+    
+    return {
+      ...data,
+      messages,
+      createdAt: new Date(data.createdAt)
+    };
+  } catch (error) {
+    console.error('Error fetching chat session:', error);
+    // Fallback to mock data if API fails
+    return getChatSession(id);
+  }
+};
+
+// Mock function as fallback
 const getChatSession = (id: string): ChatSession => {
   const mockMessages: Message[] = [
     {
@@ -95,8 +122,8 @@ export default function ChatHistoryPage() {
 
   useEffect(() => {
     if (params.id) {
-      // In a real app, fetch the chat session from an API
-      setChatSession(getChatSession(params.id as string));
+      // Fetch the chat session from the API
+      fetchChatSession(params.id as string).then(setChatSession);
     }
   }, [params.id]);
 
@@ -108,11 +135,11 @@ export default function ChatHistoryPage() {
     scrollToBottom();
   }, [chatSession?.messages]);
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!input.trim() || !chatSession) return;
 
-    // Add user message
+    // Add user message to UI immediately
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -128,12 +155,46 @@ export default function ChatHistoryPage() {
     setInput("");
     setIsLoading(true);
 
-    // Simulate AI response after a delay
-    setTimeout(() => {
+    try {
+      // Prepare messages for API in the format expected by the API
+      const apiMessages = chatSession.messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      
+      // Add the new user message
+      apiMessages.push({
+        role: "user",
+        content: userMessage.content
+      });
+
+      // Get file IDs if any are attached
+      const fileIds = chatSession.attachedFiles?.map(file => file.id) || [];
+
+      // Make API call
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: apiMessages,
+          fileIds,
+          chatId: chatSession.id
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get response from API');
+      }
+
+      const data = await response.json();
+      
+      // Add assistant response to chat
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
-        content: "I'm sorry, but this is a historical chat view. To continue the conversation, please start a new chat session.",
+        content: data.content || "Sorry, I couldn't process your request.",
         timestamp: new Date(),
       };
 
@@ -144,9 +205,39 @@ export default function ChatHistoryPage() {
           messages: [...prev.messages, assistantMessage],
         };
       });
+      
+      // Update the chat session in the database
+      await fetch(`/api/chat/sessions/${chatSession.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [...chatSession.messages, userMessage, assistantMessage]
+        }),
+      });
+      
+    } catch (error) {
+      console.error('Error in chat API call:', error);
+      
+      // Show error message
+      const errorMessage: Message = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        content: "I'm sorry, there was an error processing your request. Please try again later.",
+        timestamp: new Date(),
+      };
 
+      setChatSession((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          messages: [...prev.messages, errorMessage],
+        };
+      });
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   if (!chatSession) {

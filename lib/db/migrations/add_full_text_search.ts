@@ -55,12 +55,26 @@ try {
   console.log("Created delete trigger for FTS synchronization");
 
   // Populate FTS table with existing data
-  db.exec(`
-    INSERT INTO document_chunks_fts(rowid, content, document_id, page_number, chunk_index, content_type)
-    SELECT rowid, content, document_id, page_number, chunk_index, content_type
-    FROM document_chunks
-  `);
-  console.log("Populated FTS table with existing data");
+  try {
+    // First, check if the FTS table already has data
+    const rowCount = db.prepare('SELECT count(*) as count FROM document_chunks_fts').get().count;
+    
+    if (rowCount > 0) {
+      console.log(`FTS table already has ${rowCount} rows, skipping population step`);
+    } else {
+      // Only try to populate if the FTS table is empty
+      db.exec(`
+        INSERT INTO document_chunks_fts(rowid, content, document_id, page_number, chunk_index, content_type)
+        SELECT rowid, content, document_id, page_number, chunk_index, content_type
+        FROM document_chunks
+      `);
+      console.log("Populated FTS table with existing data");
+    }
+  } catch (error) {
+    console.error('Error populating FTS table:', error);
+    console.log('Continuing with migration despite FTS population error');
+    // Don't rethrow the error - let the migration continue
+  }
 
   console.log('Full-text search migration completed successfully!');
 } catch (error) {

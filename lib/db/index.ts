@@ -163,13 +163,15 @@ function initializeDatabase() {
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts USING fts5 (
       content,
-      content_type,
-      document_id,
-      page_number,
-      chunk_index,
-      token_count,
-      importance,
-      created_at
+      document_id UNINDEXED,
+      page_number UNINDEXED,
+      chunk_index UNINDEXED,
+      content_type UNINDEXED,
+      token_count UNINDEXED,
+      importance UNINDEXED,
+      created_at UNINDEXED,
+      content='document_chunks',
+      content_rowid='rowid'
     )
   `);
 
@@ -611,57 +613,83 @@ export function saveDocumentChunk(data: {
   contentType?: string;
   tokenCount?: number;
   importance?: number;
-}): DocumentChunk {
-  const id = uuidv4();
-  const now = Math.floor(Date.now() / 1000);
-  
-  const stmt = db.prepare(`
-    INSERT INTO document_chunks (
-      id, document_id, page_number, chunk_index, 
-      content, content_type, token_count, importance, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  
-  stmt.run(
-    id,
-    data.documentId,
-    data.pageNumber,
-    data.chunkIndex,
-    data.content,
-    data.contentType || 'text',
-    data.tokenCount || 0,
-    data.importance || 0.5,
-    now
-  );
-  
-  // Insert into FTS table
-  const ftsStmt = db.prepare(`
-    INSERT INTO document_chunks_fts (
-      content, content_type, document_id, page_number, chunk_index, token_count, importance, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  ftsStmt.run(
-    data.content,
-    data.contentType || 'text',
-    data.documentId,
-    data.pageNumber,
-    data.chunkIndex,
-    data.tokenCount || 0,
-    data.importance || 0.5,
-    now
-  );
-  
-  return {
-    id,
-    documentId: data.documentId,
-    pageNumber: data.pageNumber,
-    chunkIndex: data.chunkIndex,
-    content: data.content,
-    contentType: data.contentType || 'text',
-    tokenCount: data.tokenCount || 0,
-    importance: data.importance || 0.5,
-    createdAt: now
-  };
+}): DocumentChunk | null {
+  try {
+    const id = uuidv4();
+    const now = Math.floor(Date.now() / 1000);
+    
+    // Use a transaction to ensure data consistency
+    db.exec('BEGIN TRANSACTION');
+    
+    // Create a compound key to check for duplicates
+    const checkStmt = db.prepare(`
+      SELECT id FROM document_chunks 
+      WHERE document_id = ? AND page_number = ? AND chunk_index = ?
+    `);
+    
+    const existingChunk = checkStmt.get(data.documentId, data.pageNumber, data.chunkIndex);
+    
+    let chunkId = id;
+    
+    if (existingChunk) {
+      // Update instead of insert to avoid constraint errors
+      chunkId = existingChunk.id;
+      const updateStmt = db.prepare(`
+        UPDATE document_chunks 
+        SET content = ?, content_type = ?, token_count = ?, importance = ?
+        WHERE id = ?
+      `);
+      
+      updateStmt.run(
+        data.content,
+        data.contentType || 'text',
+        data.tokenCount || 0,
+        data.importance || 0.5,
+        chunkId
+      );
+      console.log(`Updated existing chunk ${chunkId} for document ${data.documentId}, page ${data.pageNumber}, index ${data.chunkIndex}`);
+    } else {
+      // Insert new record
+      const insertStmt = db.prepare(`
+        INSERT INTO document_chunks (
+          id, document_id, page_number, chunk_index, 
+          content, content_type, token_count, importance, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      
+      insertStmt.run(
+        chunkId,
+        data.documentId,
+        data.pageNumber,
+        data.chunkIndex,
+        data.content,
+        data.contentType || 'text',
+        data.tokenCount || 0,
+        data.importance || 0.5,
+        now
+      );
+      console.log(`Inserted new chunk ${chunkId} for document ${data.documentId}, page ${data.pageNumber}, index ${data.chunkIndex}`);
+    }
+    
+    // The FTS update is handled by triggers, so we don't need to manually insert into FTS
+    
+    // Commit the transaction
+    db.exec('COMMIT');
+    
+    // Return the record
+    const getStmt = db.prepare(`SELECT * FROM document_chunks WHERE id = ?`);
+    return getStmt.get(chunkId) as DocumentChunk;
+  } catch (error) {
+    // If anything goes wrong, roll back
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Error rolling back transaction:', rollbackError);
+    }
+    
+    console.error('Error saving document chunk:', error);
+    return null;
+  }
 }
 
 export function getDocumentChunks(documentId: string): DocumentChunk[] {
@@ -674,6 +702,29 @@ export function getDocumentChunks(documentId: string): DocumentChunk[] {
   return stmt.all(documentId) as DocumentChunk[];
 }
 
+export function getDocumentChunksByDocumentId(documentId: string): DocumentChunk[] {
+  const stmt = db.prepare(`
+    SELECT * FROM document_chunks 
+    WHERE document_id = ?
+    ORDER BY page_number ASC, chunk_index ASC
+  `);
+  
+  return stmt.all(documentId) as DocumentChunk[];
+}
+
+/**
+ * Delete all chunks for a specific document
+ */
+export function deleteDocumentChunks(documentId: string): void {
+  console.log(`Deleting chunks for document: ${documentId}`);
+  const stmt = db.prepare('DELETE FROM document_chunks WHERE document_id = ?');
+  stmt.run(documentId);
+  console.log(`Deleted chunks for document: ${documentId}`);
+}
+
+/**
+ * Search for document chunks using full-text search
+ */
 export function searchDocumentChunks(query: string, limit: number = 20): {
   chunk: DocumentChunk,
   fileInfo: { id: string; filename: string; original_filename: string; }
