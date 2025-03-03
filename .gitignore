@@ -53,3 +53,9 @@ yarn-error.log*
 # System Files
 .DS_Store
 Thumbs.db
+
+# Add these lines
+python-backend/config.py
+**/__pycache__/
+*.pyc
+repomix-output.txt
