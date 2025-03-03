@@ -1,94 +1,221 @@
-// api/chat/route.ts
+// File: app/api/chat/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { streamText } from 'ai';
 import { openai } from '@ai-sdk/openai';
+import { streamText } from 'ai';
+import { queryDocumentWithLLM, generalChat } from '@/lib/python-backend';
 
 export const runtime = 'edge';
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, fileIds, chatId, model = 'gpt-4o', temperature = 0.7, maxTokens = 4096, data, chatMode } = await req.json();
-    console.log('Chat API received:', { messages, fileIds, chatId, model, temperature, maxTokens, data });
+    const { messages, fileIds, chatId, model = 'gpt-4o', temperature = 0.7, maxTokens = 4096, chatMode = 'general', usePythonBackend = false } = await req.json();
+    console.log('Chat API received:', { messages, fileIds, chatId, model, temperature, maxTokens, chatMode, usePythonBackend });
 
-    // Handle Python backend response if provided
-    if (data?.pythonBackendResponse) {
-      console.log('Returning pythonBackendResponse:', data.pythonBackendResponse);
-      return NextResponse.json({ content: data.pythonBackendResponse, chatId });
-    }
-
-    // Document mode: Call Python backend
+    // Document mode: Proxy to Python backend
     if (fileIds && fileIds.length > 0) {
-      console.log('Document mode: Calling Python backend');
-      const lastUserMessage = messages.find((m: any) => m.role === 'user');
-      if (!lastUserMessage) {
-        throw new Error('No user message found');
+      console.log('Document mode: Calling Python backend with streaming');
+      const lastUserMessage = messages[messages.length - 1];
+      if (!lastUserMessage || lastUserMessage.role !== 'user') throw new Error('No user message found');
+      
+      // Log the actual message being sent to ensure it's correct
+      console.log('Document mode: Using message:', lastUserMessage.content);
+      
+      // Call the Python backend with streaming enabled
+      const response = await queryDocumentWithLLM(
+        lastUserMessage.content, 
+        fileIds[0], 
+        'document',
+        true // Enable streaming
+      );
+      
+      // Return the streaming response directly
+      if (response instanceof Response) {
+        console.log('Returning streaming response from Python backend for document mode');
+        // Make sure the response has the correct headers for text streaming
+        const newHeaders = new Headers(response.headers);
+        newHeaders.set('Content-Type', 'text/plain');
+        newHeaders.set('Cache-Control', 'no-cache');
+        newHeaders.set('Connection', 'keep-alive');
+        
+        // Return the response with the correct headers
+        // This will be compatible with streamProtocol: 'text' in the frontend
+        return new Response(response.body, {
+          headers: newHeaders,
+          status: response.status,
+          statusText: response.statusText,
+        });
       }
-
-      const pythonBackendUrl = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000';
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) {
-        throw new Error('OPENAI_API_KEY not configured in environment');
-      }
-
-      const response = await fetch(`${pythonBackendUrl}/query`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      
+      // Fallback if we got a non-streaming response
+      console.log('Got non-streaming response from Python backend for document mode, converting to stream');
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          // Format the response as OpenAI-compatible streaming chunks
+          // First send the role
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            id: 'chatcmpl-' + Date.now(),
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: model,
+            choices: [{
+              index: 0,
+              delta: {
+                role: 'assistant'
+              }
+            }]
+          })}\n\n`));
+          
+          // Then send the content
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            id: 'chatcmpl-' + Date.now(),
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: model,
+            choices: [{
+              index: 0,
+              delta: {
+                content: response.response
+              }
+            }]
+          })}\n\n`));
+          
+          // Send the "done" message
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            id: 'chatcmpl-' + Date.now(),
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: model,
+            choices: [{
+              index: 0,
+              delta: {},
+              finish_reason: 'stop'
+            }]
+          })}\n\n`));
+          
+          // Send the final [DONE] message
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          
+          controller.close();
         },
-        body: JSON.stringify({
-          query: lastUserMessage.content,
-          document_id: fileIds[0],
-          chat_mode: 'document',
-          api_key: apiKey,
-        }),
-        signal: AbortSignal.timeout(30000),
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Python backend error:', errorText);
-        throw new Error(`Failed to query Python backend: ${errorText}`);
-      }
-
-      const result = await response.json();
-      console.log('Python backend response:', result);
-      return NextResponse.json({ content: result.response, chatId });
+      
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
     }
 
-    // General mode: Direct OpenAI call with streamText
-    if (chatMode === 'general') {
-      console.log('Explicit general mode: Using OpenAI');
-      // Direct OpenAI call with general system prompt
-      const systemContent = 'You are a helpful AI assistant';
-      const response = await streamText({
-        model: openai(model),
-        system: systemContent,
-        messages: messages.map((msg: any) => ({ role: msg.role, content: msg.content })),
+    // General mode: Use Python backend if specified
+    if (usePythonBackend) {
+      console.log('General mode: Calling Python backend with streaming');
+      
+      // Log the messages being sent to ensure they're correct
+      console.log('General mode: Using messages:', JSON.stringify(messages));
+      
+      const response = await generalChat(messages, {
+        model,
         temperature,
         maxTokens,
+        stream: true
       });
-      return response.toDataStreamResponse();
+      
+      // Return the streaming response directly
+      if (response instanceof Response) {
+        console.log('Returning streaming response from Python backend');
+        // Make sure the response has the correct headers for text streaming
+        const newHeaders = new Headers(response.headers);
+        newHeaders.set('Content-Type', 'text/plain');
+        newHeaders.set('Cache-Control', 'no-cache');
+        newHeaders.set('Connection', 'keep-alive');
+        
+        // Return the response with the correct headers
+        // This will be compatible with streamProtocol: 'text' in the frontend
+        return new Response(response.body, {
+          headers: newHeaders,
+          status: response.status,
+          statusText: response.statusText,
+        });
+      }
+      
+      // Fallback if we got a non-streaming response
+      console.log('Got non-streaming response from Python backend, converting to stream');
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          // First send the role
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            id: 'chatcmpl-' + Date.now(),
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: model,
+            choices: [{
+              index: 0,
+              delta: {
+                role: 'assistant'
+              }
+            }]
+          })}\n\n`));
+          
+          // Then send the content
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            id: 'chatcmpl-' + Date.now(),
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: model,
+            choices: [{
+              index: 0,
+              delta: {
+                content: response.response
+              }
+            }]
+          })}\n\n`));
+          
+          // Send the "done" message
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            id: 'chatcmpl-' + Date.now(),
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: model,
+            choices: [{
+              index: 0,
+              delta: {},
+              finish_reason: 'stop'
+            }]
+          })}\n\n`));
+          
+          // Send the final [DONE] message
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          
+          controller.close();
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
     }
 
-    // General mode: Direct OpenAI call with streamText
-    console.log('General mode: Using OpenAI fallback');
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY not configured in environment');
-    }
-
-    console.log('Initiating streamText with model:', model);
-    const systemContent = 'You are an AI assistant specialized in helping users with PDF documents. You can analyze content, extract information, and answer questions about documents.';
-    const response = await streamText({
+    // General mode: Use OpenAI directly via AI SDK with streaming
+    console.log('General mode: Calling OpenAI via AI SDK');
+    const result = await streamText({
       model: openai(model),
-      system: systemContent,
-      messages: messages.map((msg: any) => ({ role: msg.role, content: msg.content })),
+      messages,
       temperature,
       maxTokens,
     });
 
-    console.log('streamText response initiated');
-    // Return streaming response directly for useChat
-    return response.toDataStreamResponse();
+    console.log('Stream initiated, returning response');
+    // Use the streaming text response for AI SDK 4.1.46
+    return result.toTextStreamResponse();
+
   } catch (error) {
     console.error('Error in chat API:', error);
     return NextResponse.json(

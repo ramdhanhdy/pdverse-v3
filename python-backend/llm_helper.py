@@ -6,12 +6,14 @@ from config import CONFIG, logger
 async def query_llm(prompt, api_key=None):
     """Query the LLM with a prompt and return the response."""
     try:
-        # Use provided API key or fall back to config
-        key_to_use = api_key or CONFIG.get('OPENAI_API_KEY') or CONFIG.get('LLM_API_KEY')
+        # Get API key from parameter or environment config
+        key_to_use = api_key or CONFIG.get('OPENAI_API_KEY')
+        logger.info(f"Using API key: {key_to_use[:8]}...")  # Log the key being used
         
-        if not key_to_use or key_to_use in ["", "your-llm-key"]:
-            logger.warning("No valid API key provided for LLM query")
-            return "Error: No valid API key provided. Please configure your API key in settings."
+        # Validate API key format
+        if not key_to_use or not key_to_use.startswith('sk-'):
+            logger.error("Invalid or missing OpenAI API key")
+            raise ValueError("Invalid API key format or missing key")
             
         headers = {
             "Content-Type": "application/json",
@@ -19,7 +21,7 @@ async def query_llm(prompt, api_key=None):
         }
         
         payload = {
-            "model": "gpt-4o",  # Updated to use GPT-4o by default
+            "model": "gpt-4o",
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant that answers questions about PDF documents."},
                 {"role": "user", "content": prompt}
@@ -28,28 +30,24 @@ async def query_llm(prompt, api_key=None):
             "max_tokens": 1000
         }
         
-        logger.info(f"Sending request to OpenAI API with prompt length: {len(prompt)}")
-        
         async with aiohttp.ClientSession() as session:
-            try:
-                async with session.post("https://api.openai.com/v1/chat/completions", 
-                                       headers=headers, 
-                                       json=payload,
-                                       timeout=60) as response:  # Increased timeout
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"OpenAI API error: Status {response.status}, {error_text}")
-                        return f"I'm sorry, I couldn't process your request due to an API error (Status {response.status})."
-                    
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-            except aiohttp.ClientError as ce:
-                logger.error(f"Connection error with OpenAI API: {ce}")
-                return "I'm sorry, I encountered a connection error while processing your request. Please try again later."
+            async with session.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"OpenAI API error: {error_text}")
+                    raise ValueError(f"API request failed: {error_text}")
+                
+                data = await response.json()
+                return data["choices"][0]["message"]["content"]
+                
     except Exception as e:
-        logger.error(f"Error querying OpenAI: {e}")
-        logger.error(traceback.format_exc())
-        return "I'm sorry, I encountered an error while processing your request."
+        logger.error(f"Error in query_llm: {str(e)}")
+        raise
 
 def build_context(chunks, query):
     """Build context from document chunks for the LLM."""
@@ -68,9 +66,13 @@ def build_context(chunks, query):
     
     return context
 
-# Add the missing functions referenced in query_document
-
-# Update these functions to accept api_key parameter
+async def generate_response_from_messages(messages, api_key=None):
+  """Generate a response based on a conversation history."""
+  prompt = "You are a helpful assistant. Answer based on the conversation:\n\n"
+  for msg in messages:
+    prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
+  prompt += "\nAssistant:"
+  return await query_llm(prompt, api_key)
 
 async def generate_response_with_context(query, context, api_key=None):
     """Generate a response using the LLM with document context."""

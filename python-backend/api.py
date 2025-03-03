@@ -6,14 +6,17 @@ import traceback
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from db import get_db_session, Document, DocumentChunk, DocumentPage, DocumentEntity, DocumentRelationship, Session, store_data
 from pdf_processing import ingest_pdf
-from llm_helper import query_llm, build_context, generate_response_with_context, generate_response, format_search_results, generate_advanced_analysis
+from llm_helper import query_llm, build_context, generate_response_with_context, generate_response, format_search_results, generate_advanced_analysis, generate_response_from_messages
 from search import fulltext_search, vector_search, hybrid_search
 from config import logger, CONFIG
 from file_storage import save_uploaded_file, delete_file, get_file_path
 import uuid
+import json
+import time
+from fastapi.responses import StreamingResponse
 
 app = FastAPI()
 
@@ -44,6 +47,14 @@ class SearchRequest(BaseModel):
     vector_weight: float = 0.65
     text_weight: float = 0.35
     filters: dict = {}
+
+class ChatRequest(BaseModel):
+    messages: List[Dict[str, Any]]
+    model: Optional[str] = "gpt-4o"
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = 4096
+    stream: Optional[bool] = True
+    api_key: Optional[str] = None
 
 @app.post("/upload")
 async def upload_file(
@@ -306,12 +317,15 @@ async def query_document(request: Request):
     document_id = data.get("document_id")
     chat_mode = data.get("chat_mode", "document")  # Default to document mode
     api_key = data.get("api_key")  # Get API key from request
+    stream = data.get("stream", False)  # Get streaming option
     
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")
     
     try:
-        logger.info(f"Processing query in {chat_mode} mode: '{query[:50]}...' with document_id: {document_id}")
+        # Log the full request data for debugging
+        logger.info(f"Query endpoint received: {json.dumps(data)}")
+        logger.info(f"Processing query in {chat_mode} mode: '{query}' with document_id: {document_id}, stream: {stream}")
         
         # Different handling based on chat mode
         if chat_mode == "document":
@@ -326,11 +340,54 @@ async def query_document(request: Request):
                 context = "Error retrieving document context. Proceeding with general response."
                 chunks = []
             
-            # Call LLM with document context and API key
+            # Check if streaming is requested
+            if stream:
+                logger.info("Streaming response requested for document mode")
+                
+                # Create a streaming response
+                async def generate_stream():
+                    # Get the full response with context
+                    response = await generate_response_with_context(query, context, api_key)
+                    
+                    # Send the content directly as plain text without any JSON formatting
+                    # This will be compatible with streamProtocol: 'text' in the frontend
+                    yield response
+                    
+                return StreamingResponse(
+                    generate_stream(),
+                    media_type="text/plain",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive"
+                    }
+                )
+            
+            # Non-streaming response
             response = await generate_response_with_context(query, context, api_key)
             
         elif chat_mode == "general":
             # General chat without document context
+            if stream:
+                logger.info("Streaming response requested for general mode")
+                
+                # Create a streaming response
+                async def generate_stream():
+                    # Get the full response
+                    response = await generate_response(query, api_key)
+                    
+                    # Send the content directly as plain text
+                    yield response
+                    
+                return StreamingResponse(
+                    generate_stream(),
+                    media_type="text/plain",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive"
+                    }
+                )
+            
+            # Non-streaming response
             response = await generate_response(query, api_key)
             context = ""
             
@@ -341,6 +398,27 @@ async def query_document(request: Request):
                 chunks = search_results.get("results", [])
                 logger.info(f"Found {len(chunks)} chunks for search query")
                 context = build_context(chunks, query)
+                
+                if stream:
+                    logger.info("Streaming response requested for search mode")
+                    
+                    # Create a streaming response
+                    async def generate_stream():
+                        # Format search results
+                        response = format_search_results(chunks, query)
+                        
+                        # Send the content directly as plain text
+                        yield response
+                        
+                    return StreamingResponse(
+                        generate_stream(),
+                        media_type="text/plain",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive"
+                        }
+                    )
+                
                 response = format_search_results(chunks, query)
             except Exception as search_error:
                 logger.error(f"Search error in search mode: {search_error}")
@@ -355,13 +433,32 @@ async def query_document(request: Request):
                 chunks = search_results.get("results", [])
                 logger.info(f"Found {len(chunks)} chunks for advanced analysis")
                 context = build_context(chunks, query)
+                
+                if stream:
+                    logger.info("Streaming response requested for advanced mode")
+                    
+                    # Create a streaming response
+                    async def generate_stream():
+                        # Get the full response with advanced analysis
+                        response = await generate_advanced_analysis(query, context, api_key)
+                        
+                        # Send the content directly as plain text
+                        yield response
+                        
+                    return StreamingResponse(
+                        generate_stream(),
+                        media_type="text/plain",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive"
+                        }
+                    )
+                
+                response = await generate_advanced_analysis(query, context, api_key)
             except Exception as search_error:
                 logger.error(f"Search error in advanced mode: {search_error}")
                 context = "Error retrieving document context. Proceeding with general response."
                 chunks = []
-            
-            # Call LLM with advanced analysis prompt and API key
-            response = await generate_advanced_analysis(query, context, api_key)
             
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported chat mode: {chat_mode}")
@@ -377,6 +474,55 @@ async def query_document(request: Request):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
+@app.post("/chat")
+async def chat(request: ChatRequest):
+    try:
+        logger.info(f"Chat request received with {len(request.messages)} messages")
+        
+        # Log the full messages for debugging
+        logger.info(f"Chat messages: {json.dumps(request.messages)}")
+        
+        # Check if streaming is requested
+        if request.stream:
+            logger.info("Streaming response requested")
+            
+            # Create a streaming response
+            async def generate_stream():
+                # Get the full response using all messages
+                response = await generate_response_from_messages(
+                    messages=request.messages,
+                    api_key=request.api_key
+                )
+                
+                # Send the content directly as plain text without any JSON formatting
+                # This will be compatible with streamProtocol: 'text' in the frontend
+                yield response
+                
+            return StreamingResponse(
+                generate_stream(),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive"
+                }
+            )
+        
+        # Non-streaming response
+        response = await generate_response_from_messages(
+            messages=request.messages,
+            api_key=request.api_key
+        )
+        
+        logger.info("Chat response generated successfully")
+        
+        # Return the response
+        return {"response": response}
+
+    except Exception as e:
+        logger.error(f"Chat error: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

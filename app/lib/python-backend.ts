@@ -61,37 +61,54 @@ export async function getDocumentsFromPythonBackend(id?: string) {
   }
 }
 
-export async function queryDocumentWithLLM(query: string, documentId: string, chatMode: string) {
-  try {
-    const pythonBackendUrl = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000';
-    const apiKey = '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'; // From your working curl
-    
-    const response = await fetch(`${pythonBackendUrl}/query`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query,
-        document_id: documentId,
-        chat_mode: chatMode,
-        api_key: apiKey,
-      }),
-    });
+export async function queryDocumentWithLLM(
+  query: string,
+  document_id?: string,
+  chat_mode: string = 'document',
+  stream: boolean = false
+): Promise<{
+  response: string;
+  context: string;
+  mode: string;
+} | Response> {
+  const PYTHON_BACKEND_URL = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000';
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('queryDocumentWithLLM error:', errorText);
-      throw new Error(`Failed to query document: ${errorText}`);
-    }
+  console.log('queryDocumentWithLLM called with:', { query, document_id, chat_mode, stream });
 
-    const result = await response.json();
-    console.log('queryDocumentWithLLM response:', result);
-    return result;
-  } catch (error) {
-    console.error('queryDocumentWithLLM failed:', error);
-    throw error;
+  const response = await fetch(`${PYTHON_BACKEND_URL}/query`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      document_id,
+      chat_mode, // Ensure this is snake_case for Python backend compatibility
+      stream,    // Add streaming option
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to query document with LLM');
   }
+
+  // If streaming is enabled, return the response directly
+  if (stream) {
+    console.log('Returning streaming response from Python backend for document mode');
+    // Return the response with text/plain content type for compatibility with streamProtocol: 'text'
+    return new Response(response.body, {
+      headers: {
+        'Content-Type': 'text/plain',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  }
+
+  const result = await response.json();
+  return result;
 }
 
 export async function getDocumentFromPythonBackend(documentId: string) {
@@ -115,4 +132,64 @@ export async function getDocumentFromPythonBackend(documentId: string) {
     console.error('getDocumentFromPythonBackend error:', error);
     throw error;
   }
+}
+
+/**
+ * General chat with the Python backend without document context
+ * Uses server-side API key configuration
+ */
+export async function generalChat(
+  messages: any[],
+  options: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    stream?: boolean;
+  } = {}
+): Promise<{
+  response: string;
+} | Response> {
+  const PYTHON_BACKEND_URL = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000';
+  const { model = 'gpt-4o', temperature = 0.7, maxTokens = 4096, stream = false } = options;
+
+  console.log('generalChat called with:', { messages, model, temperature, maxTokens, stream });
+
+  const response = await fetch(`${PYTHON_BACKEND_URL}/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messages,
+      model,
+      temperature,
+      max_tokens: maxTokens,
+      stream,
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    console.error('General chat error:', error);
+    throw new Error(error.detail || 'Failed to process general chat');
+  }
+
+  // If streaming is enabled, return the response directly
+  if (stream) {
+    console.log('Returning streaming response from Python backend');
+    // Return the response with text/plain content type for compatibility with streamProtocol: 'text'
+    return new Response(response.body, {
+      headers: {
+        'Content-Type': 'text/plain',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  }
+
+  // Otherwise, parse the JSON response
+  const result = await response.json();
+  console.log('generalChat response:', result); // Added debug log
+  return result; // Should return { response: string }
 }

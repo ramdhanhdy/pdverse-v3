@@ -2,8 +2,7 @@
 
 import { useRef, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { useChat } from 'ai/react';
+import { useChat } from '@ai-sdk/react';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
@@ -11,10 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { searchDocumentsInPythonBackend } from '@/lib/python-backend';
-import { queryDocumentWithLLM } from 'd:/pdverse-v3/lib/python-backend';
 import { ChatModeSelector } from './components/ChatModeSelector';
-
 
 type FileAttachment = {
   id: string;
@@ -26,58 +22,49 @@ export default function ChatPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [availableFiles, setAvailableFiles] = useState<FileAttachment[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
-  const [aiModel, setAiModel] = useState("GPT-4o");
-  const [chatMode, setChatMode] = useState<'document' | 'general' | 'search' | 'advanced'>('document');
+  const [chatMode, setChatMode] = useState<'document' | 'general' | 'search' | 'advanced'>('general');
+  const [usePythonBackend, setUsePythonBackend] = useState<boolean>(false);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  const { messages, input, handleInputChange, isLoading, append, setInput } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, isLoading, setInput } = useChat({
     api: '/api/chat',
     body: {
       fileIds: attachedFiles.map(file => file.id),
-      chatMode: chatMode
+      chatMode: chatMode,
+      usePythonBackend: usePythonBackend,
     },
-    onResponse: async (response) => {
-      console.log('Raw response from useChat:', response.status);
-      const data = await response.json();
-      console.log('Parsed response:', data);
+    initialMessages: [],
+    streamProtocol: 'text',
+    onResponse: (response) => {
+      console.log('Raw response received:', response);
+      console.log('Response status:', response.status);
       
-      // Only append if we're in general mode
-      if (chatMode === 'general' && data?.content) {
-        await append({
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: data.content,
-        });
-      }
+      // Log headers safely
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+      console.log('Response headers:', headers);
+    },
+    onFinish: (message) => {
+      console.log('Stream finished with message:', message);
     },
     onError: (error) => {
       console.error('useChat error:', error);
     },
   });
 
+  // Log messages and loading state
   useEffect(() => {
-    const loadAiModel = () => {
-      try {
-        const savedModel = localStorage.getItem("ai_model") || "gpt-4o";
-        const modelDisplayNames: Record<string, string> = {
-          "gpt-4o": "GPT-4o",
-          "gpt-4-turbo": "GPT-4 Turbo",
-          "gpt-4": "GPT-4",
-          "gpt-3.5-turbo": "GPT-3.5 Turbo"
-        };
-        setAiModel(modelDisplayNames[savedModel] || "GPT-4o");
-      } catch (error) {
-        console.error("Error loading AI model setting:", error);
-      }
-    };
-    loadAiModel();
-  }, []);
+    console.log('Messages updated:', messages);
+    console.log('isLoading:', isLoading);
+  }, [messages, isLoading]);
 
   const fetchAvailableFiles = async () => {
     setIsLoadingFiles(true);
     try {
-      const response = await fetch("/api/files");
-      if (!response.ok) throw new Error("Failed to fetch files");
+      const response = await fetch('/api/files');
+      if (!response.ok) throw new Error('Failed to fetch files');
       const data = await response.json();
       if (!data?.files) {
         setAvailableFiles([]);
@@ -85,11 +72,11 @@ export default function ChatPage() {
       }
       const files = data.files.map((file: any) => ({
         id: file.id,
-        name: file.original_filename || file.filename
+        name: file.original_filename || file.filename,
       }));
       setAvailableFiles(files);
     } catch (error) {
-      console.error("Error fetching files:", error);
+      console.error('Error fetching files:', error);
       setAvailableFiles([]);
     } finally {
       setIsLoadingFiles(false);
@@ -107,91 +94,25 @@ export default function ChatPage() {
     setAttachedFiles(attachedFiles.filter(file => file.id !== fileId));
   };
 
-  const handleMessageSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (isLoading || !input.trim()) return;
-
-    const userMessage = input;
-    setInput(''); // Clear input immediately
-
-    // Add user message
-    await append({
-      role: 'user',
-      content: userMessage,
-    });
-
-    try {
-      if (attachedFiles.length > 0) {
-        // Document mode: Direct API call
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            messages: [...messages, { role: 'user', content: userMessage }],
-            fileIds: attachedFiles.map(file => file.id),
-            chatMode: 'document'
-          }),
-        });
-
-        const data = await response.json();
-        await append({
-          role: 'assistant',
-          content: data.content,
-        });
-      } else {
-        // General mode: Let useChat handle it
-        await append({
-          role: 'user',
-          content: userMessage,
-        });
-      }
-    } catch (error) {
-      console.error('Submit error:', error);
-      await append({
-        role: 'assistant',
-        content: "Sorry, I encountered an error processing your request.",
-      });
-    }
-  };
-
-  const formatSearchResults = (searchResults: any) => {
-    if (!searchResults || !searchResults.results || searchResults.results.length === 0) {
-      return "No results found for your query.";
-    }
-    let formattedResponse = `### Search Results\n\nHere are the top results for your query:\n\n`;
-    searchResults.results.forEach((result: any, index: number) => {
-      const documentTitle = result.document_title || 'Untitled Document';
-      const content = result.content || '';
-      formattedResponse += `**Result ${index + 1}** (from ${documentTitle})\n`;
-      formattedResponse += `${content.substring(0, 300)}${content.length > 300 ? '...' : ''}\n\n`;
-    });
-    formattedResponse += `Found ${searchResults.total} results in total.`;
-    return formattedResponse;
-  };
-
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
       <div className="w-full max-w-3xl mx-auto flex flex-col h-full relative">
         <div className={`flex-1 overflow-y-auto px-4 space-y-5 ${attachedFiles.length > 0 ? 'mb-[180px]' : 'mb-[140px]'}`}>
-          {messages.map(message => (
-            <div 
-              key={message.id} 
+          {messages.map((message) => (
+            <div
+              key={message.id}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div className="flex flex-col">
                 {message.role !== 'user' && (
                   <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/60 text-[10px] font-medium ml-1 mb-1 w-fit">
                     <span className="h-1 w-1 rounded-full bg-green-500"></span>
-                    <span>{aiModel}</span>
+                    <span>GPT-4o</span>
                   </div>
                 )}
-                <div 
+                <div
                   className={`max-w-[85%] rounded-lg p-3 text-sm ${
-                    message.role === 'user' 
-                      ? 'bg-primary text-primary-foreground' 
-                      : 'bg-muted'
+                    message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'
                   }`}
                 >
                   <div className="whitespace-pre-wrap">{message.content}</div>
@@ -209,7 +130,7 @@ export default function ChatPage() {
             </div>
           )}
         </div>
-        
+
         {attachedFiles.length > 0 && (
           <div className="px-4 py-3 absolute bottom-[76px] left-0 right-0 bg-background border-t">
             <div className="max-w-3xl mx-auto flex flex-wrap gap-2">
@@ -231,9 +152,9 @@ export default function ChatPage() {
             </div>
           </div>
         )}
-        
+
         <div className="px-4 pt-2 pb-4 absolute bottom-0 left-0 right-0 bg-background border-t">
-          <form onSubmit={handleMessageSubmit} className="relative max-w-3xl mx-auto flex items-center gap-2">
+          <form onSubmit={handleSubmit} className="relative max-w-3xl mx-auto flex items-center gap-2">
             <ChatModeSelector 
               currentMode={chatMode}
               onModeChange={(mode) => {
@@ -242,6 +163,20 @@ export default function ChatPage() {
               }}
               compact={true}
             />
+            {chatMode === 'general' && (
+              <button
+                type="button"
+                onClick={() => setUsePythonBackend(!usePythonBackend)}
+                className={`px-2 py-1 text-xs rounded-md ${
+                  usePythonBackend 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'bg-muted text-muted-foreground'
+                }`}
+                title={usePythonBackend ? "Using Python Backend" : "Using AI SDK Directly"}
+              >
+                {usePythonBackend ? "PY" : "SDK"}
+              </button>
+            )}
             <div className="relative shadow-sm rounded-lg border border-input flex-1">
               <Textarea
                 ref={textAreaRef}
@@ -293,7 +228,7 @@ export default function ChatPage() {
             </Button>
           </form>
         </div>
-        
+
         {isDialogOpen && (
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogContent className="sm:max-w-md">

@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { readDataStream } from 'ai/sdk';
 
 type Message = {
   id: string;
@@ -188,21 +189,67 @@ export default function ChatHistoryPage() {
         throw new Error('Failed to get response from API');
       }
 
-      const data = await response.json();
-      
-      // Add assistant response to chat
-      const assistantMessage: Message = {
+      // Create temporary assistant message
+      const tempAssistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
-        content: data.content || "Sorry, I couldn't process your request.",
+        content: "",
         timestamp: new Date(),
+      };
+
+      setChatSession(prev => prev ? {
+        ...prev,
+        messages: [...prev.messages, tempAssistantMessage]
+      } : prev);
+
+      // Process the stream using AI SDK utilities
+      let accumulatedContent = '';
+      const reader = response.body?.getReader();
+      
+      if (reader) {
+        for await (const { type, value } of readDataStream(reader)) {
+          if (type === 'text') {
+            accumulatedContent += value;
+            
+            // Update UI incrementally
+            setChatSession(prev => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                messages: prev.messages.map(msg => 
+                  msg.id === tempAssistantMessage.id 
+                    ? { ...msg, content: accumulatedContent } 
+                    : msg
+                )
+              };
+            });
+          }
+        }
+      }
+
+      // Final message update
+      const assistantMessage: Message = {
+        ...tempAssistantMessage,
+        content: accumulatedContent
       };
 
       setChatSession((prev) => {
         if (!prev) return prev;
+        
+        // Check for existing pending assistant message
+        const hasPending = prev.messages.some(m => 
+          m.role === 'assistant' && m.content === ''
+        );
+
         return {
           ...prev,
-          messages: [...prev.messages, assistantMessage],
+          messages: hasPending
+            ? prev.messages.map(m => 
+                m.role === 'assistant' && m.content === '' 
+                  ? assistantMessage 
+                  : m
+              )
+            : [...prev.messages, assistantMessage]
         };
       });
       

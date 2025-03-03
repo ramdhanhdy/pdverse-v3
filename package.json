@@ -10,7 +10,8 @@
     "db:init": "tsx lib/db/migrate.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^1.1.14",
+    "@ai-sdk/openai": "^1.1.15",
+    "@ai-sdk/react": "^1.1.20",
     "@google/generative-ai": "^0.22.0",
     "@radix-ui/react-alert-dialog": "^1.0.5",
     "@radix-ui/react-avatar": "^1.0.4",
