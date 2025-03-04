@@ -63,7 +63,7 @@ export async function getDocumentsFromPythonBackend(id?: string) {
 
 export async function queryDocumentWithLLM(
   query: string,
-  document_id?: string,
+  document_id?: string | string[],
   chat_mode: string = 'document',
   stream: boolean = false
 ): Promise<{
@@ -74,7 +74,12 @@ export async function queryDocumentWithLLM(
 } | Response> {
   const PYTHON_BACKEND_URL = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000';
 
-  console.log('queryDocumentWithLLM called with:', { query, document_id, chat_mode, stream });
+  console.log('queryDocumentWithLLM called with:', { 
+    query, 
+    document_id: Array.isArray(document_id) ? `${document_id.length} documents` : document_id, 
+    chat_mode, 
+    stream 
+  });
 
   const response = await fetch(`${PYTHON_BACKEND_URL}/query`, {
     method: 'POST',
@@ -115,7 +120,8 @@ export async function queryDocumentWithLLM(
     console.log('Enhanced document chat search results:', {
       total: result.search_results.total,
       entities_found: result.search_results.entities_found,
-      execution_time: result.search_results.execution_time
+      execution_time: result.search_results.execution_time,
+      document_count: Array.isArray(result.search_results.document_ids) ? result.search_results.document_ids.length : 1
     });
   }
   

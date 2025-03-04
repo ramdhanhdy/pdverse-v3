@@ -21,9 +21,10 @@ export async function POST(req: NextRequest) {
       console.log('Document mode: Using message:', lastUserMessage.content);
       
       // Call the Python backend with streaming enabled
+      // Pass all fileIds as document_id (now supports multiple documents)
       const response = await queryDocumentWithLLM(
         lastUserMessage.content, 
-        fileIds[0], 
+        fileIds, // Pass the entire array of fileIds
         'document',
         true // Enable streaming
       );

@@ -355,7 +355,7 @@ def document_chat_search(query, document_id, limit=15, importance_weight=0.3, en
     
     Args:
         query: The user's query string
-        document_id: The ID of the document to search within
+        document_id: The ID of the document to search within (can be a single ID or a list of IDs)
         limit: Maximum number of results to return
         importance_weight: Weight for chunk importance scores
         entity_weight: Weight for entity-based relevance
@@ -369,18 +369,27 @@ def document_chat_search(query, document_id, limit=15, importance_weight=0.3, en
     session = get_db_session()
     
     try:
-        print(f"Document chat search query: '{query}' for document: {document_id}")
+        print(f"Document chat search query: '{query}' for document(s): {document_id}")
         
-        # Validate document_id
+        # Validate document_id - can be a single ID or a list of IDs
         if not document_id:
             raise ValueError("Document ID is required for document chat search")
         
-        document_id = UUID(document_id) if isinstance(document_id, str) else document_id
+        # Convert to list if a single document_id is provided
+        if isinstance(document_id, (str, UUID)):
+            document_ids = [UUID(document_id) if isinstance(document_id, str) else document_id]
+        else:
+            # Assume it's a list or iterable of document IDs
+            document_ids = [UUID(doc_id) if isinstance(doc_id, str) else doc_id for doc_id in document_id]
+        
+        print(f"Processing {len(document_ids)} document(s)")
         
         # Get document metadata for context
-        document = session.query(Document).filter(Document.id == document_id).first()
-        if not document:
-            raise ValueError(f"Document with ID {document_id} not found")
+        documents = session.query(Document).filter(Document.id.in_(document_ids)).all()
+        if not documents:
+            raise ValueError(f"No documents found with the provided IDs")
+        
+        document_map = {doc.id: doc for doc in documents}
             
         # Initialize embedder per request - similar to hybrid_search
         print("Initializing SentenceTransformer embedder")
@@ -415,27 +424,61 @@ def document_chat_search(query, document_id, limit=15, importance_weight=0.3, en
             
         # 1. Chunk-Level Semantic Search using raw SQL
         # Use raw SQL with direct parameter binding like in hybrid_search
-        query_sql = text("""
-            SELECT 
-                dc.id AS chunk_id,
-                dc.document_id,
-                dc.page_number,
-                dc.content,
-                dc.section_path,
-                dc.importance,
-                dc.content_type,
-                1 - (dc.embedding <=> :query_embedding) AS semantic_similarity
-            FROM document_chunks dc
-            WHERE dc.document_id = :document_id
-        """)
+        # Modified to support multiple document IDs - use a simpler approach
         
-        results = session.execute(
-            query_sql,
-            {
-                "query_embedding": str(query_embedding),
-                "document_id": str(document_id)
-            }
-        ).fetchall()
+        # Use a simpler approach with parameter binding
+        if len(document_ids) == 1:
+            # Single document - use simple equality
+            query_sql = text("""
+                SELECT 
+                    dc.id AS chunk_id,
+                    dc.document_id,
+                    dc.page_number,
+                    dc.content,
+                    dc.section_path,
+                    dc.importance,
+                    dc.content_type,
+                    1 - (dc.embedding <=> :query_embedding) AS semantic_similarity
+                FROM document_chunks dc
+                WHERE dc.document_id = :document_id
+            """)
+            
+            results = session.execute(
+                query_sql,
+                {
+                    "query_embedding": str(query_embedding),
+                    "document_id": str(document_ids[0])
+                }
+            ).fetchall()
+        else:
+            # Multiple documents - use IN clause with individual queries and combine results
+            all_results = []
+            for doc_id in document_ids:
+                query_sql = text("""
+                    SELECT 
+                        dc.id AS chunk_id,
+                        dc.document_id,
+                        dc.page_number,
+                        dc.content,
+                        dc.section_path,
+                        dc.importance,
+                        dc.content_type,
+                        1 - (dc.embedding <=> :query_embedding) AS semantic_similarity
+                    FROM document_chunks dc
+                    WHERE dc.document_id = :document_id
+                """)
+                
+                doc_results = session.execute(
+                    query_sql,
+                    {
+                        "query_embedding": str(query_embedding),
+                        "document_id": str(doc_id)
+                    }
+                ).fetchall()
+                
+                all_results.extend(doc_results)
+            
+            results = all_results
         
         # 2. Entity Recognition
         # Extract potential entities from the query
@@ -443,9 +486,9 @@ def document_chat_search(query, document_id, limit=15, importance_weight=0.3, en
         query_terms = query.lower().split()
         potential_entities = []
         
-        # Get entities from the document
+        # Get entities from all documents
         entities = session.query(DocumentEntity).filter(
-            DocumentEntity.document_id == document_id
+            DocumentEntity.document_id.in_(document_ids)
         ).all()
         
         # Find entities mentioned in the query
@@ -467,7 +510,7 @@ def document_chat_search(query, document_id, limit=15, importance_weight=0.3, en
         if entity_matches:
             relationships = session.query(DocumentRelationship).filter(
                 and_(
-                    DocumentRelationship.document_id == document_id,
+                    DocumentRelationship.document_id.in_(document_ids),
                     or_(
                         DocumentRelationship.source_entity_id.in_(entity_matches),
                         DocumentRelationship.target_entity_id.in_(entity_matches)
@@ -487,17 +530,24 @@ def document_chat_search(query, document_id, limit=15, importance_weight=0.3, en
         
         table_pages = []
         if table_query:
-            table_pages = session.query(DocumentPage.page_number).filter(
+            table_pages_query = session.query(DocumentPage.document_id, DocumentPage.page_number).filter(
                 and_(
-                    DocumentPage.document_id == document_id,
+                    DocumentPage.document_id.in_(document_ids),
                     DocumentPage.has_table == True
                 )
             ).all()
-            table_pages = [page.page_number for page in table_pages]
+            table_pages = [(page.document_id, page.page_number) for page in table_pages_query]
         
         # 5. Process and score results
         processed_results = []
         for r in results:
+            # Get document for this result
+            doc_id = r.document_id
+            document = document_map.get(doc_id)
+            
+            if not document:
+                continue  # Skip if document not found
+            
             # Base score from semantic similarity
             base_score = float(r.semantic_similarity)
             
@@ -513,7 +563,7 @@ def document_chat_search(query, document_id, limit=15, importance_weight=0.3, en
             
             # Structural relevance score
             structural_score = 0.0
-            if table_query and r.page_number in table_pages:
+            if table_query and (doc_id, r.page_number) in table_pages:
                 structural_score = 1.0
             elif r.content_type == 'table' and table_query:
                 structural_score = 1.0
@@ -545,42 +595,45 @@ def document_chat_search(query, document_id, limit=15, importance_weight=0.3, en
                 'relationship_relevance': relationship_score,
                 'structural_relevance': structural_score,
                 'importance': importance_score,
-                'score': combined_score
+                'score': combined_score,
+                'document_info': {
+                    'title': document.title,
+                    'author': document.author,
+                    'document_type': document.document_type,
+                    'creation_date': document.creation_date.isoformat() if document.creation_date else None,
+                    'topics': document.topics
+                }
             })
         
         # Sort by combined score and limit results
         processed_results.sort(key=lambda x: x['score'], reverse=True)
         limited_results = processed_results[:limit]
         
-        # Add document metadata
-        for result in limited_results:
-            result['document_info'] = {
-                'title': document.title,
-                'author': document.author,
-                'document_type': document.document_type,
-                'creation_date': document.creation_date.isoformat() if document.creation_date else None,
-                'topics': document.topics
-            }
-        
         # Calculate execution time
         elapsed_time = time.time() - start_time
+        
+        # Collect document metadata for all documents
+        documents_metadata = []
+        for doc in documents:
+            documents_metadata.append({
+                'id': str(doc.id),
+                'title': doc.title,
+                'author': doc.author,
+                'document_type': doc.document_type,
+                'page_count': doc.page_count,
+                'topics': doc.topics
+            })
         
         return {
             'results': limited_results,
             'total': len(processed_results),
             'query': query,
             'limit': limit,
-            'document_id': str(document_id),
+            'document_ids': [str(doc_id) for doc_id in document_ids],
             'search_type': 'document_chat',
             'execution_time': elapsed_time,
             'entities_found': potential_entities,
-            'document_metadata': {
-                'title': document.title,
-                'author': document.author,
-                'document_type': document.document_type,
-                'page_count': document.page_count,
-                'topics': document.topics
-            }
+            'documents_metadata': documents_metadata
         }
     except Exception as e:
         print(f"Document chat search failed: {e}")

@@ -93,9 +93,10 @@ export async function searchDocumentsInPythonBackend(
 // Add this function to pass the API key to the backend
 export async function queryDocumentWithLLM(
   query: string,
-  document_id?: string,
-  chat_mode: string = 'document'
-): Promise<{
+  document_id?: string | string[],
+  chat_mode: string = 'document',
+  stream: boolean = false
+): Promise<Response | {
   response: string;
   context: string;
   mode: string;
@@ -106,6 +107,110 @@ export async function queryDocumentWithLLM(
   const PYTHON_BACKEND_URL = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000';
   
   try {
+    // Handle streaming requests
+    if (stream) {
+      const response = await fetch(`${PYTHON_BACKEND_URL}/query/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query,
+          document_id,
+          chat_mode,
+          api_key: apiKey,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to query document with LLM');
+      }
+      
+      return response;
+    }
+    
+    // Handle multiple documents with the new workflow
+    if (Array.isArray(document_id) && document_id.length > 1) {
+      console.log(`Processing multiple documents (${document_id.length}) with separate queries`);
+      
+      // Step 1: Generate document-specific queries for each document
+      const generateQueriesResponse = await fetch(`${PYTHON_BACKEND_URL}/generate_document_queries`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          original_query: query,
+          document_ids: document_id,
+          api_key: apiKey,
+        }),
+      });
+      
+      if (!generateQueriesResponse.ok) {
+        const error = await generateQueriesResponse.json();
+        throw new Error(error.detail || 'Failed to generate document-specific queries');
+      }
+      
+      const { document_queries } = await generateQueriesResponse.json();
+      
+      // Step 2: Execute each document-specific query against its respective document
+      const documentResults = await Promise.all(
+        document_id.map(async (docId, index) => {
+          const docQuery = document_queries[index] || query; // Fallback to original query if specific one not available
+          
+          const docResponse = await fetch(`${PYTHON_BACKEND_URL}/query`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              query: docQuery,
+              document_id: docId,
+              chat_mode,
+              api_key: apiKey,
+            }),
+            signal: AbortSignal.timeout(30000),
+          });
+          
+          if (!docResponse.ok) {
+            console.error(`Error querying document ${docId}`);
+            return null;
+          }
+          
+          return await docResponse.json();
+        })
+      );
+      
+      // Step 3: Combine the results into a unified response
+      const validResults = documentResults.filter(result => result !== null);
+      
+      if (validResults.length === 0) {
+        throw new Error('Failed to get results from any document');
+      }
+      
+      // Step 4: Generate a combined response from individual document responses
+      const combineResponse = await fetch(`${PYTHON_BACKEND_URL}/combine_document_responses`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          original_query: query,
+          document_responses: validResults,
+          api_key: apiKey,
+        }),
+      });
+      
+      if (!combineResponse.ok) {
+        const error = await combineResponse.json();
+        throw new Error(error.detail || 'Failed to combine document responses');
+      }
+      
+      return await combineResponse.json();
+    }
+    
+    // Original single document flow
     const response = await fetch(`${PYTHON_BACKEND_URL}/query`, {
       method: 'POST',
       headers: {

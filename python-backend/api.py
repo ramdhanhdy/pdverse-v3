@@ -339,8 +339,18 @@ async def query_document(request: Request):
             if not document_id:
                 raise HTTPException(status_code=400, detail="Document ID is required for document chat mode")
             
+            # Handle both single document ID and list of document IDs
+            if isinstance(document_id, list):
+                if not document_id:  # Empty list
+                    raise HTTPException(status_code=400, detail="At least one document ID is required")
+                document_ids = document_id
+                logger.info(f"Processing multiple documents: {len(document_ids)} documents")
+            else:
+                document_ids = [document_id]
+                logger.info(f"Processing single document: {document_id}")
+            
             # Use our new document chat search function
-            search_results = document_chat_search(query, document_id)
+            search_results = document_chat_search(query, document_ids)
             
             if "error" in search_results:
                 raise HTTPException(status_code=500, detail=f"Search failed: {search_results['error']}")
@@ -349,7 +359,8 @@ async def query_document(request: Request):
             context = build_document_chat_context(
                 search_results["results"], 
                 query,
-                search_results.get("document_metadata")
+                search_results.get("documents_metadata"),
+                search_results.get("entities_found")
             )
             
             # Generate streaming response if requested
@@ -359,7 +370,7 @@ async def query_document(request: Request):
                     response_text = await generate_document_chat_response(
                         query, 
                         context, 
-                        search_results.get("document_metadata"),
+                        search_results.get("documents_metadata"),
                         api_key
                     )
                     
@@ -374,7 +385,7 @@ async def query_document(request: Request):
             response_text = await generate_document_chat_response(
                 query, 
                 context,
-                search_results.get("document_metadata"),
+                search_results.get("documents_metadata"),
                 api_key
             )
             
@@ -509,7 +520,259 @@ async def chat(request: ChatRequest):
         logger.error(f"Chat error: {str(e)}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/generate_document_queries")
+async def generate_document_queries(request: Request):
+    """
+    Generate document-specific queries for multiple documents.
     
+    This endpoint takes an original query and a list of document IDs,
+    and generates a tailored query for each document based on its content.
+    """
+    try:
+        data = await request.json()
+        original_query = data.get("original_query")
+        document_ids = data.get("document_ids")
+        api_key = data.get("api_key")
+        
+        if not original_query:
+            raise HTTPException(status_code=400, detail="Original query is required")
+        
+        if not document_ids or not isinstance(document_ids, list) or len(document_ids) == 0:
+            raise HTTPException(status_code=400, detail="At least one document ID is required")
+        
+        logger.info(f"Generating document-specific queries for {len(document_ids)} documents")
+        
+        session = get_db_session()
+        document_queries = []
+        document_metadata = []
+        
+        # Get metadata for each document
+        for doc_id in document_ids:
+            try:
+                document = session.query(Document).filter(Document.id == uuid.UUID(doc_id)).first()
+                if not document:
+                    logger.warning(f"Document not found: {doc_id}")
+                    document_queries.append(original_query)  # Use original query as fallback
+                    document_metadata.append(None)
+                    continue
+                
+                # Add document metadata
+                doc_meta = {
+                    'id': str(document.id),
+                    'title': document.title,
+                    'author': document.author,
+                    'document_type': document.document_type,
+                    'topics': document.topics,
+                    'page_count': document.page_count
+                }
+                document_metadata.append(doc_meta)
+                
+                # Get a sample of chunks to understand document content
+                sample_chunks = session.query(DocumentChunk).filter(
+                    DocumentChunk.document_id == document.id
+                ).order_by(DocumentChunk.importance.desc()).limit(5).all()
+                
+                sample_content = "\n".join([chunk.content for chunk in sample_chunks])
+                
+                # Generate document-specific query using LLM
+                system_prompt = """You are an expert query reformulation system. Your task is to reformulate the original query to be more specific to the document content provided.
+                Focus on adapting the query to extract the most relevant information from this specific document.
+                Return ONLY the reformulated query without any explanation or additional text."""
+                
+                user_prompt = f"""Original query: {original_query}
+                
+                Document information:
+                Title: {document.title}
+                Author: {document.author}
+                Topics: {', '.join(document.topics) if document.topics else 'Not specified'}
+                
+                Sample content from document:
+                {sample_content}
+                
+                Generate a specific query for this document that will help extract the most relevant information related to the original query."""
+                
+                # Use the API key if provided
+                if api_key:
+                    os.environ["OPENAI_API_KEY"] = api_key
+                
+                # Generate the document-specific query
+                doc_specific_query = await generate_response(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.3,
+                    max_tokens=100
+                )
+                
+                # Clean up the response
+                doc_specific_query = doc_specific_query.strip()
+                
+                # Add to results
+                document_queries.append(doc_specific_query)
+                logger.info(f"Generated query for document {doc_id}: {doc_specific_query}")
+                
+            except Exception as e:
+                logger.error(f"Error generating query for document {doc_id}: {e}")
+                document_queries.append(original_query)  # Use original query as fallback
+                document_metadata.append(None)
+        
+        return {
+            "original_query": original_query,
+            "document_queries": document_queries,
+            "document_metadata": document_metadata
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating document queries: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/combine_document_responses")
+async def combine_document_responses(request: Request):
+    """
+    Combine responses from multiple documents into a unified response.
+    
+    This endpoint takes the original query and the responses from multiple documents,
+    and generates a unified response that combines the information from all documents.
+    """
+    try:
+        data = await request.json()
+        original_query = data.get("original_query")
+        document_responses = data.get("document_responses")
+        api_key = data.get("api_key")
+        
+        if not original_query:
+            raise HTTPException(status_code=400, detail="Original query is required")
+        
+        if not document_responses or not isinstance(document_responses, list) or len(document_responses) == 0:
+            raise HTTPException(status_code=400, detail="At least one document response is required")
+        
+        logger.info(f"Combining responses from {len(document_responses)} documents")
+        
+        # Extract responses and contexts from each document
+        combined_context = ""
+        for i, doc_response in enumerate(document_responses):
+            if not doc_response:
+                continue
+                
+            response = doc_response.get("response", "")
+            context = doc_response.get("context", "")
+            
+            # Add document information to the context
+            combined_context += f"\n\n--- DOCUMENT {i+1} INFORMATION ---\n"
+            combined_context += f"Response: {response}\n\n"
+            combined_context += f"Context: {context}\n"
+        
+        # Generate a unified response using LLM
+        system_prompt = """You are an expert document analysis system. Your task is to create a comprehensive response that combines information from multiple documents.
+        
+        Follow these guidelines:
+        1. Synthesize information from all documents to provide a complete answer
+        2. Highlight differences or contradictions between documents
+        3. Cite the specific document when presenting information from it
+        4. Organize the response in a logical structure
+        5. Be concise but comprehensive"""
+        
+        user_prompt = f"""Original query: {original_query}
+        
+        Information from multiple documents:
+        {combined_context}
+        
+        Please provide a comprehensive response that combines information from all documents to answer the original query."""
+        
+        # Use the API key if provided
+        if api_key:
+            os.environ["OPENAI_API_KEY"] = api_key
+        
+        # Generate the combined response
+        combined_response = await generate_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.5,
+            max_tokens=1500
+        )
+        
+        return {
+            "response": combined_response,
+            "context": combined_context,
+            "mode": "multi_document"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error combining document responses: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/query/stream")
+async def query_document_stream(request: Request):
+    """
+    Streaming version of the query endpoint.
+    """
+    try:
+        data = await request.json()
+        query = data.get("query")
+        document_id = data.get("document_id")
+        chat_mode = data.get("chat_mode", "document")
+        api_key = data.get("api_key")
+        
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+        
+        logger.info(f"Streaming query received: {query[:50]}... (mode: {chat_mode})")
+        
+        # Document chat mode with multi-layer retrieval
+        if chat_mode == "document":
+            if not document_id:
+                raise HTTPException(status_code=400, detail="Document ID is required for document chat mode")
+            
+            # Handle both single document ID and list of document IDs
+            if isinstance(document_id, list):
+                if not document_id:  # Empty list
+                    raise HTTPException(status_code=400, detail="At least one document ID is required")
+                document_ids = document_id
+                logger.info(f"Processing multiple documents: {len(document_ids)} documents")
+            else:
+                document_ids = [document_id]
+                logger.info(f"Processing single document: {document_id}")
+            
+            # Use our document chat search function
+            search_results = document_chat_search(query, document_ids)
+            
+            if "error" in search_results:
+                raise HTTPException(status_code=500, detail=f"Search failed: {search_results['error']}")
+            
+            # Build enhanced context for document chat
+            context = build_document_chat_context(
+                search_results["results"], 
+                query,
+                search_results.get("documents_metadata"),
+                search_results.get("entities_found")
+            )
+            
+            # Set API key if provided
+            if api_key:
+                os.environ["OPENAI_API_KEY"] = api_key
+            
+            # Return streaming response
+            return StreamingResponse(
+                generate_document_chat_response(
+                    context=context,
+                    query=query,
+                    stream=True
+                ),
+                media_type="text/plain"
+            )
+        
+        # Other chat modes (search, advanced, general)
+        # ... (implement other modes as needed)
+        
+        raise HTTPException(status_code=400, detail=f"Unsupported chat mode: {chat_mode}")
+        
+    except Exception as e:
+        logger.error(f"Streaming query failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

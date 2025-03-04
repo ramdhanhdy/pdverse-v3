@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '../../../../components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Check, ChevronDown, FileText, MessageSquare, Search, Zap } from 'lucide-react';
+import { Check, ChevronDown, MessageSquare, Search, Zap, Layers } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 
 type ChatMode = 'document' | 'general' | 'search' | 'advanced';
@@ -16,8 +16,8 @@ const modes = [
   {
     id: 'document',
     name: 'Enhanced Document Chat',
-    description: 'Smart chat with multi-layer document understanding',
-    icon: FileText,
+    description: 'Smart chat with document understanding',
+    icon: Layers,
   },
   {
     id: 'general',
@@ -50,7 +50,7 @@ export function ChatModeSelector({ currentMode, onModeChange, compact = false }:
             <Button 
               variant="ghost" 
               size="icon"
-              className="h-9 w-9 rounded-full p-0"
+              className="h-9 w-9 rounded-full p-0 relative hover:bg-muted/50"
             >
               <currentModeData.icon className="h-5 w-5" />
               <span className="sr-only">{currentModeData.name}</span>
@@ -58,7 +58,7 @@ export function ChatModeSelector({ currentMode, onModeChange, compact = false }:
           ) : (
             <Button 
               variant="outline" 
-              className="flex items-center justify-between w-[240px] font-normal"
+              className="flex items-center justify-between w-[240px] font-normal rounded-full"
             >
               <div className="flex items-center">
                 <currentModeData.icon className="mr-2 h-4 w-4" />
@@ -68,14 +68,14 @@ export function ChatModeSelector({ currentMode, onModeChange, compact = false }:
             </Button>
           )}
         </PopoverTrigger>
-        <PopoverContent className="w-[240px] p-0" align={compact ? "end" : "start"}>
+        <PopoverContent className="w-[240px] p-0 rounded-xl" align={compact ? "end" : "start"}>
           <div className="flex flex-col">
             {modes.map((mode) => (
               <Button
                 key={mode.id}
                 variant="ghost"
                 className={cn(
-                  "flex items-center justify-between px-4 py-2 text-left",
+                  "flex items-center justify-between px-4 py-2 text-left rounded-lg",
                   currentMode === mode.id && "bg-muted"
                 )}
                 onClick={() => onModeChange(mode.id as ChatMode)}
@@ -83,7 +83,9 @@ export function ChatModeSelector({ currentMode, onModeChange, compact = false }:
                 <div className="flex items-center">
                   <mode.icon className="mr-2 h-4 w-4" />
                   <div>
-                    <p className="text-sm font-medium">{mode.name}</p>
+                    <div className="flex items-center">
+                      <p className="text-sm font-medium">{mode.name}</p>
+                    </div>
                     <p className="text-xs text-muted-foreground">{mode.description}</p>
                   </div>
                 </div>
