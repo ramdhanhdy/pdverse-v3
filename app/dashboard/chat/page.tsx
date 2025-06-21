@@ -24,8 +24,6 @@ export default function ChatPage() {
     attachedFiles,
     addAttachedFile,
     removeAttachedFile,
-    usePythonBackend,
-    setUsePythonBackend,
     isFileSidebarOpen,
     setIsFileSidebarOpen,
     isProcessingDocuments,
@@ -39,7 +37,6 @@ export default function ChatPage() {
     body: {
       fileIds: attachedFiles.map(file => file.id),
       chatMode: chatMode,
-      usePythonBackend: usePythonBackend,
     },
     initialMessages: [],
     streamProtocol: 'text',
@@ -197,20 +194,6 @@ export default function ChatPage() {
             <div className={`flex items-center gap-3 p-2 backdrop-blur-lg rounded-2xl shadow-lg ${theme === 'light' ? 'bg-gray-100/80 border border-gray-200' : 'bg-background/10 border border-white/10'}`}>
               <div className="flex items-center gap-2 pl-2">
                 <ChatModeSelector compact={true} />
-                {chatMode === 'general' && (
-                  <button
-                    type="button"
-                    onClick={() => setUsePythonBackend(!usePythonBackend)}
-                    className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
-                      usePythonBackend 
-                        ? 'bg-primary text-primary-foreground' 
-                        : 'bg-muted text-muted-foreground'
-                    }`}
-                    title={usePythonBackend ? "Using Python Backend" : "Using AI SDK Directly"}
-                  >
-                    {usePythonBackend ? "PY" : "SDK"}
-                  </button>
-                )}
               </div>
               <div className="relative flex-1 bg-background rounded-xl overflow-hidden">
                 <Textarea

@@ -44,11 +44,11 @@ type PdfMetadata = {
   modification_date?: string;
   summary?: string;
   document_type?: string;
-  topics?: string;
+  topics?: string[];
   ai_enhanced?: boolean;
   needs_review?: boolean;
-  created_at: number;
-  updated_at: number;
+  created_at: string;
+  updated_at: string;
 };
 
 const FileMetadataSection = ({ metadata }: { metadata: any }) => {
@@ -72,7 +72,7 @@ const FileMetadataSection = ({ metadata }: { metadata: any }) => {
         <CardContent className="space-y-2">
           <div>
             <span className="font-medium">Document Type:</span>
-            <span className="ml-2">{metadata.doc_type || "Unclassified"}</span>
+            <span className="ml-2">{metadata.document_type || "Unclassified"}</span>
           </div>
           <div>
             <span className="font-medium">Key Topics:</span>
@@ -127,7 +127,7 @@ export default function FileViewPage() {
     body: {
       fileIds: file ? [file.id] : [],
       chatMode: chatMode,
-      usePythonBackend: true,
+
     },
     initialMessages: [],
     streamProtocol: 'text',
@@ -140,7 +140,7 @@ export default function FileViewPage() {
       try {
         setIsLoading(true);
         
-        // Use Python backend to get document details
+        // Get document details
         try {
           const documentData = await getDocumentFromPythonBackend(params.id as string);
           
@@ -159,20 +159,21 @@ export default function FileViewPage() {
           setFile(fileData);
           
           // Set metadata from Python backend
+          const docData = documentData as any; // Bypass incorrect type inference
           const metadataData: PdfMetadata = {
-            file_id: documentData.id,
-            title: documentData.title,
-            author: documentData.author,
-            summary: documentData.summary,
-            page_count: documentData.page_count,
-            creation_date: documentData.creation_date || undefined,
-            modification_date: documentData.modification_date || undefined,
-            document_type: documentData.doc_type,
-            topics: documentData.topics || [],
+            file_id: docData.id,
+            title: docData.title,
+            author: docData.author,
+            // summary is not available in the initial fetch, it's added via enhanceMetadata
+            page_count: docData.page_count,
+            creation_date: docData.creation_date || undefined,
+            modification_date: docData.modification_date || undefined,
+            document_type: docData.document_type, // Correct property name
+            topics: docData.topics || [],
             ai_enhanced: true,
             needs_review: false,
-            created_at: new Date(documentData.creation_date || Date.now()).getTime() / 1000,
-            updated_at: new Date(documentData.modification_date || Date.now()).getTime() / 1000,
+            created_at: docData.creation_date || new Date().toISOString(), // Ensure string type
+            updated_at: docData.modification_date || new Date().toISOString(), // Ensure string type
           };
           
           setMetadata(metadataData);
@@ -393,20 +394,24 @@ export default function FileViewPage() {
     if (!file || !window.confirm("Are you sure you want to delete this file? This action cannot be undone.")) {
       return;
     }
-    
+
     try {
       setIsDeleting(true);
-      
-      const response = await fetch(`/api/files?id=${file.id}`, {
+      const response = await fetch(`/api/files/${file.id}`, { 
         method: 'DELETE',
       });
-      if (!response.ok) throw new Error('Failed to delete file');
-      
-      toast.success("File deleted successfully");
-      router.push("/dashboard/files");
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete file');
+      }
+
+      toast.success('File deleted successfully');
+      router.push('/dashboard/files'); 
     } catch (error) {
-      console.error("Error deleting file:", error);
-      toast.error("Failed to delete file. Please try again.");
+      console.error('Error deleting file:', error);
+      toast.error(error instanceof Error ? error.message : 'An unexpected error occurred.');
+    } finally {
       setIsDeleting(false);
     }
   };
