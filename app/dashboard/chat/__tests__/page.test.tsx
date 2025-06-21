@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import ChatPage from '../page';
 
-// Mock the useChat hook as it makes network requests
+// Mock the useChat hook
 jest.mock('@ai-sdk/react', () => ({
   useChat: () => ({
     messages: [],
@@ -15,7 +15,31 @@ jest.mock('@ai-sdk/react', () => ({
   }),
 }));
 
-// Mock child components to isolate the ChatPage component
+// Mock the Zustand stores
+jest.mock('@/lib/store/themeStore', () => ({
+  useThemeStore: () => ({
+    theme: 'light',
+  }),
+}));
+
+jest.mock('@/lib/store/chatStore', () => ({
+  useChatStore: () => ({
+    chatMode: 'general',
+    setChatMode: jest.fn(),
+    attachedFiles: [],
+    addAttachedFile: jest.fn(),
+    removeAttachedFile: jest.fn(),
+    usePythonBackend: false,
+    setUsePythonBackend: jest.fn(),
+    isFileSidebarOpen: false,
+    setIsFileSidebarOpen: jest.fn(),
+    isProcessingDocuments: false,
+    setIsProcessingDocuments: jest.fn(),
+  }),
+}));
+
+
+// Mock child components
 jest.mock('../components/FileSidebar', () => ({
     __esModule: true,
     FileSidebar: () => <div>Mocked FileSidebar</div>
@@ -30,6 +54,10 @@ jest.mock('../components/DocumentChatMessage', () => ({
 }));
 
 describe('ChatPage', () => {
+  beforeEach(() => {
+    // We can reset mocks if needed between tests, but for now this is fine.
+  });
+
   it('renders the welcome message when there are no messages', () => {
     render(<ChatPage />);
     const welcomeMessage = screen.getByText(/Welcome to PDVerse Chat/i);

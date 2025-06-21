@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useTheme } from "next-themes";
+import { useThemeStore } from "../lib/store/themeStore";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,7 +12,7 @@ import {
 import { SunIcon, MoonIcon, LaptopIcon } from "lucide-react";
 
 export function ThemeToggle() {
-  const { setTheme } = useTheme();
+  const { setTheme } = useThemeStore();
   const [mounted, setMounted] = React.useState(false);
 
   React.useEffect(() => {

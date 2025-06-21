@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { FileText, X, Search, ChevronLeft, ChevronRight, Info, Calendar, FileType, Hash, Layers } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { useChatStore } from '@/lib/store/chatStore';
 
 type FileAttachment = {
   id: string;
@@ -26,21 +27,14 @@ type DocumentInfo = {
   filename: string;
 };
 
-interface FileSidebarProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  onAttachFile: (file: FileAttachment) => void;
-  attachedFiles: FileAttachment[];
-  onRemoveFile: (fileId: string) => void;
-}
-
-export function FileSidebar({ 
-  isOpen, 
-  onOpenChange, 
-  onAttachFile, 
-  attachedFiles,
-  onRemoveFile
-}: FileSidebarProps) {
+export function FileSidebar() {
+  const {
+    isFileSidebarOpen: isOpen,
+    setIsFileSidebarOpen: onOpenChange,
+    addAttachedFile: onAttachFile,
+    removeAttachedFile: onRemoveFile,
+    attachedFiles,
+  } = useChatStore();
   const [availableFiles, setAvailableFiles] = useState<DocumentInfo[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
