@@ -6,7 +6,8 @@ PDVerse is a powerful PDF management system with integrated AI chat capabilities
 
 - **PDF Management**: Upload, organize, view, and delete PDF documents
 - **File Organization**: Create folders, tag documents, and search through your collection
-- **Semantic Search**: Search for files semantically based on their content
+- **Advanced Search**: Search for files semantically based on their content
+  ![](https://github.com/ramdhanhdy/pdverse-v3/blob/master/demo.gif)
 - **PDF Viewer**: Built-in PDF viewer with annotation capabilities
 - **AI Chat Assistant**: Get help with document analysis, content extraction, and general questions
   - Chat with AI about your PDF documents
