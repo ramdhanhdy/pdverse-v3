@@ -12,7 +12,17 @@ import {
 import { SunIcon, MoonIcon, LaptopIcon } from "lucide-react";
 
 export function ThemeToggle() {
-  const { setTheme, theme } = useTheme();
+  const { setTheme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    // Render a placeholder to prevent layout shift and hydration errors
+    return <div className="h-9 w-9" />;
+  }
 
   return (
     <DropdownMenu>

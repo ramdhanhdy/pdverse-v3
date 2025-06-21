@@ -104,7 +104,8 @@ export async function queryDocumentWithLLM(
   // Get API key from localStorage
   const apiKey = typeof window !== 'undefined' ? localStorage.getItem("openai_api_key") : null;
   
-  const PYTHON_BACKEND_URL = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000';
+  // Use the consistent URL getter
+  const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://127.0.0.1:8000';
   
   try {
     // Handle streaming requests
@@ -353,7 +354,8 @@ export async function getDocumentsFromPythonBackend(id?: string) {
    * Delete a document from the Python backend
    */
   export async function deleteDocumentFromPythonBackend(documentId: string) {
-    const PYTHON_BACKEND_URL = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000';
+    // Use the consistent URL getter
+    const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://127.0.0.1:8000';
     
     try {
       const response = await fetch(`${PYTHON_BACKEND_URL}/document/${documentId}`, {

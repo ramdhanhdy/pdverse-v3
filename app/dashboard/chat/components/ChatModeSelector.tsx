@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '../../../../components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Check, ChevronDown, MessageSquare, Search, Zap, Layers } from 'lucide-react';
+import { Check, ChevronDown, MessageSquare, Layers } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 
-type ChatMode = 'document' | 'general' | 'search' | 'advanced';
+type ChatMode = 'document' | 'general';
 
 interface ChatModeSelectorProps {
   currentMode: ChatMode;
@@ -15,8 +15,8 @@ interface ChatModeSelectorProps {
 const modes = [
   {
     id: 'document',
-    name: 'Enhanced Document Chat',
-    description: 'Smart chat with document understanding',
+    name: 'Document Chat',
+    description: 'Chat with, search, and analyze documents',
     icon: Layers,
   },
   {
@@ -25,21 +25,23 @@ const modes = [
     description: 'Chat without document context',
     icon: MessageSquare,
   },
-  {
-    id: 'search',
-    name: 'Search Mode',
-    description: 'Search across all documents',
-    icon: Search,
-  },
-  {
-    id: 'advanced',
-    name: 'Advanced Analysis',
-    description: 'Deep document analysis',
-    icon: Zap,
-  },
 ];
 
 export function ChatModeSelector({ currentMode, onModeChange, compact = false }: ChatModeSelectorProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    // Render a placeholder on the server to prevent layout shift
+    if (compact) {
+      return <div className="h-9 w-9 rounded-full bg-muted/50" />;
+    }
+    return <div className="h-10 w-[240px] rounded-full bg-muted/50" />;
+  }
+
   const currentModeData = modes.find((mode) => mode.id === currentMode) || modes[0];
 
   return (
@@ -75,18 +77,18 @@ export function ChatModeSelector({ currentMode, onModeChange, compact = false }:
                 key={mode.id}
                 variant="ghost"
                 className={cn(
-                  "flex items-center justify-between px-4 py-2 text-left rounded-lg",
+                  "flex items-center justify-between px-4 py-2 text-left rounded-lg h-auto",
                   currentMode === mode.id && "bg-muted"
                 )}
                 onClick={() => onModeChange(mode.id as ChatMode)}
               >
                 <div className="flex items-center">
                   <mode.icon className="mr-2 h-4 w-4" />
-                  <div>
+                  <div className="flex-1">
                     <div className="flex items-center">
                       <p className="text-sm font-medium">{mode.name}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground">{mode.description}</p>
+                    <p className="text-xs text-muted-foreground whitespace-normal">{mode.description}</p>
                   </div>
                 </div>
                 {currentMode === mode.id && <Check className="h-4 w-4" />}

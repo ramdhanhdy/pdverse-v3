@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDocumentFromPythonBackend } from "@/lib/python-backend";
-import { getFileById } from "@/lib/db";
+// import { getFileById } from "@/lib/db"; // Remove unused SQLite import
 
 export async function GET(request: NextRequest) {
   try {

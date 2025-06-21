@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPdfMetadata, savePdfMetadata, getFileById } from "@/lib/db";
+import { 
+  getDocumentDetailsAndMetadataFromPythonBackend, 
+  updateDocumentMetadataInPythonBackend 
+} from "@/lib/python-backend";
 import { enhanceMetadataWithGemini } from "@/lib/ai/gemini";
 import fs from "fs";
 import path from "path";
@@ -9,7 +12,7 @@ export async function POST(request: NextRequest) {
     console.log("Enhance metadata API called");
     const data = await request.json();
     const { fileId } = data;
-    console.log("File ID:", fileId);
+    console.log("File ID (Backend Document ID):", fileId);
 
     if (!fileId) {
       return NextResponse.json(
@@ -18,29 +21,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get current metadata
-    const metadata = getPdfMetadata(fileId);
-    console.log("Retrieved metadata:", metadata ? "Found" : "Not found");
-    if (!metadata) {
-      return NextResponse.json(
-        { error: "Metadata not found for this file" },
+    // Get current metadata and file details from Python backend
+    const backendData = await getDocumentDetailsAndMetadataFromPythonBackend(fileId);
+    console.log("Retrieved backend data:", backendData ? "Found" : "Not found");
+    
+    if (!backendData || !backendData.metadata || !backendData.fileDetails) {
+         return NextResponse.json(
+        { error: "Document details or metadata not found from backend for this file ID" },
         { status: 404 }
       );
     }
 
-    // Get the file record to get the actual filename
-    const fileRecord = getFileById(fileId);
-    console.log("File record:", fileRecord ? "Found" : "Not found", fileRecord);
-    if (!fileRecord) {
-      return NextResponse.json(
-        { error: "File record not found" },
+    const metadata = backendData.metadata;
+    const fileDetails = backendData.fileDetails;
+
+    // Use filename from backend data
+    const filename = fileDetails.filename; 
+    if (!filename) {
+         return NextResponse.json(
+        { error: "Filename not found in backend data" },
         { status: 404 }
       );
     }
 
     // Get file path to extract text
     const uploadsDir = path.join(process.cwd(), "uploads");
-    const filePath = path.join(uploadsDir, fileRecord.filename);
+    const filePath = path.join(uploadsDir, filename);
     console.log("File path:", filePath);
 
     if (!fs.existsSync(filePath)) {
@@ -62,7 +68,7 @@ export async function POST(request: NextRequest) {
     console.log("Text extraction complete, text length:", extractionResult.fullText.length);
     const { fullText } = extractionResult;
 
-    // Convert DB metadata to the format expected by enhanceMetadataWithGemini
+    // Convert backend metadata to the format expected by enhanceMetadataWithGemini
     const metadataForEnhancement = {
       title: metadata.title || "",
       author: metadata.author || "",
@@ -70,14 +76,14 @@ export async function POST(request: NextRequest) {
       keywords: metadata.keywords || "",
       creator: metadata.creator || "",
       producer: metadata.producer || "",
-      pageCount: metadata.page_count || 0,
-      creationDate: metadata.creation_date || "",
-      modificationDate: metadata.modification_date || "",
+      pageCount: metadata.page_count || metadata.pageCount || 0,
+      creationDate: metadata.creation_date || metadata.creationDate || "",
+      modificationDate: metadata.modification_date || metadata.modificationDate || "",
       summary: metadata.summary || "",
-      documentType: metadata.document_type || "",
-      topics: metadata.topics ? metadata.topics.split(",").map(t => t.trim()) : [],
-      aiEnhanced: Boolean(metadata.ai_enhanced),
-      needsReview: Boolean(metadata.needs_review)
+      documentType: metadata.document_type || metadata.documentType || "",
+      topics: Array.isArray(metadata.topics) ? metadata.topics : (metadata.topics?.split(",").map((t: string) => t.trim()) || []),
+      aiEnhanced: Boolean(metadata.ai_enhanced || metadata.aiEnhanced),
+      needsReview: Boolean(metadata.needs_review || metadata.needsReview)
     };
 
     // Enhance metadata with Gemini
@@ -90,38 +96,36 @@ export async function POST(request: NextRequest) {
     console.log("Gemini API response received");
     console.log("Enhanced metadata from Gemini:", JSON.stringify(enhancedMetadata, null, 2));
 
-    // Save enhanced metadata back to database
-    console.log("Saving enhanced metadata to database");
+    // Save enhanced metadata back via Python backend
+    console.log("Saving enhanced metadata via Python backend");
     
-    // Ensure all values are of the correct type for SQLite
-    const sanitizedMetadata = {
-      fileId,
-      title: String(enhancedMetadata.title || ''),
-      author: String(enhancedMetadata.author || ''),
-      subject: String(enhancedMetadata.subject || ''),
-      keywords: String(enhancedMetadata.keywords || ''),
-      creator: String(enhancedMetadata.creator || ''),
-      producer: String(enhancedMetadata.producer || ''),
-      pageCount: Number(enhancedMetadata.pageCount || 0),
-      creationDate: String(enhancedMetadata.creationDate || ''),
-      modificationDate: String(enhancedMetadata.modificationDate || ''),
-      summary: String(enhancedMetadata.summary || ''),
-      documentType: String(enhancedMetadata.documentType || ''),
-      // Convert topics array to string
-      topics: Array.isArray(enhancedMetadata.topics) 
-        ? enhancedMetadata.topics.join(", ") 
-        : String(enhancedMetadata.topics || ''),
-      // Keep as boolean values - the savePdfMetadata function will handle conversion to SQLite integers
-      aiEnhanced: Boolean(enhancedMetadata.aiEnhanced),
-      needsReview: Boolean(enhancedMetadata.needsReview)
+    // Prepare metadata for the backend PUT/POST request
+    const metadataToSave = {
+        title: String(enhancedMetadata.title || ''),
+        author: String(enhancedMetadata.author || ''),
+        subject: String(enhancedMetadata.subject || ''),
+        keywords: Array.isArray(enhancedMetadata.keywords) ? enhancedMetadata.keywords.join(", ") : String(enhancedMetadata.keywords || ''),
+        creator: String(enhancedMetadata.creator || ''),
+        producer: String(enhancedMetadata.producer || ''),
+        page_count: Number(enhancedMetadata.pageCount || 0),
+        creation_date: String(enhancedMetadata.creationDate || ''),
+        modification_date: String(enhancedMetadata.modificationDate || ''),
+        summary: String(enhancedMetadata.summary || ''),
+        document_type: String(enhancedMetadata.documentType || ''),
+        topics: Array.isArray(enhancedMetadata.topics) ? enhancedMetadata.topics.join(", ") : String(enhancedMetadata.topics || ''),
+        ai_enhanced: Boolean(enhancedMetadata.aiEnhanced),
+        needs_review: Boolean(enhancedMetadata.needsReview)
     };
     
-    console.log("Sanitized metadata:", JSON.stringify(sanitizedMetadata, null, 2));
-    const updatedMetadata = await savePdfMetadata(sanitizedMetadata);
-    console.log("Metadata successfully enhanced and saved");
+    console.log("Metadata to save:", JSON.stringify(metadataToSave, null, 2));
+    // Call the backend update function
+    const updatedMetadataResult = await updateDocumentMetadataInPythonBackend(fileId, metadataToSave); 
+    console.log("Metadata successfully enhanced and saved via backend");
+    
+    // Return the result from the backend update call, adapting as needed
     return NextResponse.json({ 
       success: true, 
-      metadata: updatedMetadata 
+      metadata: updatedMetadataResult
     });
   } catch (error) {
     console.error("Error enhancing metadata:", error);

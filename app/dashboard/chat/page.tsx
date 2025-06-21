@@ -17,7 +17,7 @@ type FileAttachment = {
 export default function ChatPage() {
   const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
   const [isFileSidebarOpen, setIsFileSidebarOpen] = useState(false);
-  const [chatMode, setChatMode] = useState<'document' | 'general' | 'search' | 'advanced'>('general');
+  const [chatMode, setChatMode] = useState<'document' | 'general'>('general');
   const [usePythonBackend, setUsePythonBackend] = useState<boolean>(false);
   const [isProcessingDocuments, setIsProcessingDocuments] = useState(false);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
@@ -93,9 +93,8 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)]">
-      <div className="w-full max-w-5xl mx-auto flex flex-col h-full relative px-4 sm:px-6 lg:px-8">
-        <div className="flex-1 overflow-y-auto space-y-5 mb-[140px] pt-6">
+    <div className="flex flex-col h-[calc(100vh-4rem)] w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex-1 overflow-y-auto space-y-5 pt-6">
           {messages.map((message) => (
             <div
               key={message.id}
@@ -181,8 +180,7 @@ export default function ChatPage() {
             </div>
           )}
         </div>
-
-        <div className="px-4 pt-3 pb-6 absolute bottom-0 left-0 right-0 bg-background border-t backdrop-blur-sm bg-background/80">
+        <div className="bg-background/80 backdrop-blur-md p-4">
           {attachedFiles.length > 0 && (
             <div className="max-w-5xl mx-auto mb-3 flex items-center">
               <div className="flex items-center gap-2">
@@ -235,9 +233,7 @@ export default function ChatPage() {
                   ref={textAreaRef}
                   value={input}
                   onChange={handleInputChange}
-                  placeholder={`Ask a question in ${chatMode === 'document' ? 'Document Chat' : 
-                                chatMode === 'general' ? 'General Chat' : 
-                                chatMode === 'search' ? 'Search Mode' : 'Advanced Analysis'} mode...`}
+                  placeholder={`Ask a question in ${chatMode === 'document' ? 'Document Chat' : 'General Chat'} mode...`}
                   className="w-full p-3 pr-12 min-h-[60px] max-h-[180px] resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -288,7 +284,6 @@ export default function ChatPage() {
           attachedFiles={attachedFiles}
           onRemoveFile={handleRemoveFile}
         />
-      </div>
     </div>
   );
 }

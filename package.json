@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "test": "jest --watch",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -29,7 +30,6 @@
     "@types/better-sqlite3": "^7.6.12",
     "@types/uuid": "^10.0.0",
     "ai": "^4.1.46",
-    "better-sqlite3": "^11.8.1",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "date-fns": "^3.3.1",
@@ -56,7 +56,10 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
     "@types/bun": "^1.2.4",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.11.5",
     "@types/pg": "^8.11.11",
     "@types/react": "^18.2.48",
@@ -65,8 +68,11 @@
     "drizzle-kit": "^0.19.1",
     "eslint": "^8.56.0",
     "eslint-config-next": "14.0.4",
+    "jest": "^30.0.2",
+    "jest-environment-jsdom": "^30.0.2",
     "postcss": "^8.4.33",
     "tailwindcss": "^3.4.1",
+    "ts-jest": "^29.4.0",
     "ts-node": "^10.9.2",
     "tsx": "^4.19.3",
     "typescript": "^5.3.3"

@@ -278,7 +278,7 @@ export default function DashboardLayout({
             </div>
           </div>
           {/* User section - collapsed sidebar */}
-          <div className={`${sidebarOpen && "lg:hidden"} hidden lg:flex flex-col border-t p-4 items-center justify-center gap-4`}>
+          <div className={`${sidebarOpen && "lg:hidden"} hidden lg:flex flex-col mt-auto border-t p-4 items-center justify-center gap-4`}>
             <div className="h-8 w-8 rounded-full bg-muted" title="John Doe"></div>
             <ThemeToggle />
           </div>
