@@ -2,13 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '../../../../components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Check, ChevronDown, MessageSquare, Layers } from 'lucide-react';
-import { cn } from '../../../../lib/utils';
+import { cn } from '@/lib/utils';
+import { useChatStore } from '@/lib/store/chatStore';
 
 type ChatMode = 'document' | 'general';
 
 interface ChatModeSelectorProps {
-  currentMode: ChatMode;
-  onModeChange: (mode: ChatMode) => void;
   compact?: boolean;
 }
 
@@ -27,7 +26,8 @@ const modes = [
   },
 ];
 
-export function ChatModeSelector({ currentMode, onModeChange, compact = false }: ChatModeSelectorProps) {
+export function ChatModeSelector({ compact = false }: ChatModeSelectorProps) {
+  const { chatMode: currentMode, setChatMode: onModeChange } = useChatStore();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {

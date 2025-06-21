@@ -3,6 +3,9 @@
 import { useRef, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@ai-sdk/react';
+import { v4 as uuidv4 } from 'uuid';
+import { useThemeStore } from '@/lib/store/themeStore';
+import { useChatStore } from '@/lib/store/chatStore';
 import { Textarea } from '@/components/ui/textarea';
 import { ChatModeSelector } from './components/ChatModeSelector';
 import { FileSidebar } from './components/FileSidebar';
@@ -15,12 +18,21 @@ type FileAttachment = {
 };
 
 export default function ChatPage() {
-  const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
-  const [isFileSidebarOpen, setIsFileSidebarOpen] = useState(false);
-  const [chatMode, setChatMode] = useState<'document' | 'general'>('general');
-  const [usePythonBackend, setUsePythonBackend] = useState<boolean>(false);
-  const [isProcessingDocuments, setIsProcessingDocuments] = useState(false);
+  const {
+    chatMode,
+    setChatMode,
+    attachedFiles,
+    addAttachedFile,
+    removeAttachedFile,
+    usePythonBackend,
+    setUsePythonBackend,
+    isFileSidebarOpen,
+    setIsFileSidebarOpen,
+    isProcessingDocuments,
+    setIsProcessingDocuments,
+  } = useChatStore();
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const { theme } = useThemeStore();
 
   const { messages, input, handleInputChange, handleSubmit, isLoading, setInput } = useChat({
     api: '/api/chat',
@@ -34,15 +46,11 @@ export default function ChatPage() {
     onResponse: (response) => {
       console.log('Raw response received:', response);
       console.log('Response status:', response.status);
-      
-      // Log headers safely
       const headers: Record<string, string> = {};
       response.headers.forEach((value, key) => {
         headers[key] = value;
       });
       console.log('Response headers:', headers);
-      
-      // Set processing state to false when response is received
       setIsProcessingDocuments(false);
     },
     onFinish: (message) => {
@@ -55,40 +63,23 @@ export default function ChatPage() {
     },
   });
 
-  // Log messages and loading state
   useEffect(() => {
     console.log('Messages updated:', messages);
     console.log('isLoading:', isLoading);
   }, [messages, isLoading]);
 
-  const handleAttachFile = (file: FileAttachment) => {
-    if (!attachedFiles.some(f => f.id === file.id)) {
-      setAttachedFiles([...attachedFiles, file]);
-    }
-  };
-
-  const handleRemoveFile = (fileId: string) => {
-    setAttachedFiles(attachedFiles.filter(file => file.id !== fileId));
-  };
-
-  // Set chat mode to document if files are attached
   useEffect(() => {
     if (attachedFiles.length > 0 && chatMode !== 'document') {
       setChatMode('document');
     }
-  }, [attachedFiles, chatMode]);
-  
-  // Custom submit handler to set processing state
+  }, [attachedFiles, chatMode, setChatMode]);
+
   const handleCustomSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    
     if (!input.trim() || isLoading) return;
-    
-    // Set processing state to true when submitting in document mode
     if (chatMode === 'document' && attachedFiles.length > 0) {
       setIsProcessingDocuments(true);
     }
-    
     handleSubmit(e);
   };
 
@@ -180,7 +171,7 @@ export default function ChatPage() {
             </div>
           )}
         </div>
-        <div className="bg-background/80 backdrop-blur-md p-4">
+        <div className="p-4">
           {attachedFiles.length > 0 && (
             <div className="max-w-5xl mx-auto mb-3 flex items-center">
               <div className="flex items-center gap-2">
@@ -203,16 +194,9 @@ export default function ChatPage() {
           )}
           
           <form onSubmit={handleCustomSubmit} className="relative max-w-5xl mx-auto">
-            <div className="flex items-center gap-3 p-2 bg-muted/30 rounded-2xl border shadow-sm">
+            <div className={`flex items-center gap-3 p-2 backdrop-blur-lg rounded-2xl shadow-lg ${theme === 'light' ? 'bg-gray-100/80 border border-gray-200' : 'bg-background/10 border border-white/10'}`}>
               <div className="flex items-center gap-2 pl-2">
-                <ChatModeSelector 
-                  currentMode={chatMode}
-                  onModeChange={(mode) => {
-                    setChatMode(mode);
-                    if (mode !== 'document') setAttachedFiles([]);
-                  }}
-                  compact={true}
-                />
+                <ChatModeSelector compact={true} />
                 {chatMode === 'general' && (
                   <button
                     type="button"
@@ -277,13 +261,7 @@ export default function ChatPage() {
           </form>
         </div>
 
-        <FileSidebar
-          isOpen={isFileSidebarOpen}
-          onOpenChange={setIsFileSidebarOpen}
-          onAttachFile={handleAttachFile}
-          attachedFiles={attachedFiles}
-          onRemoveFile={handleRemoveFile}
-        />
+        <FileSidebar />
     </div>
   );
 }
