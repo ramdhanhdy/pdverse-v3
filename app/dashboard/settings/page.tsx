@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 
 export default function SettingsPage() {
-  const [apiKey, setApiKey] = useState("");
+
   const [isLoading, setIsLoading] = useState(false);
   const [aiModel, setAiModel] = useState("gpt-4o");
   const [temperature, setTemperature] = useState(0.7);
@@ -24,11 +24,6 @@ export default function SettingsPage() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        // Load API key from localStorage
-        const savedApiKey = localStorage.getItem("openai_api_key");
-        if (savedApiKey) {
-          setApiKey(savedApiKey);
-        }
 
         // Load AI settings from localStorage
         const savedAiModel = localStorage.getItem("ai_model") || "gpt-4o";
@@ -69,38 +64,6 @@ export default function SettingsPage() {
     }
   };
 
-  // Save API key
-  const handleSaveApiKey = async () => {
-    setIsLoading(true);
-    try {
-      // Save to localStorage
-      localStorage.setItem("openai_api_key", apiKey);
-      
-      // Optional: Validate API key with a test request
-      const isValid = await validateApiKey(apiKey);
-      
-      if (isValid) {
-        toast.success("API key saved successfully");
-      } else {
-        toast.error("Invalid API key");
-      }
-    } catch (error) {
-      console.error("Error saving API key:", error);
-      toast.error("Failed to save API key");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Validate API key with a test request
-  const validateApiKey = async (key: string) => {
-    try {
-      // This is a simple validation - in production you might want to make a test request
-      return key.startsWith("sk-") && key.length > 20;
-    } catch (error) {
-      return false;
-    }
-  };
 
   // Save AI settings
   const handleSaveAISettings = () => {
@@ -190,35 +153,6 @@ export default function SettingsPage() {
         </TabsList>
         
         <TabsContent value="ai" className="mt-6 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>API Configuration</CardTitle>
-              <CardDescription>
-                Configure your OpenAI API key for AI chat functionality
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="api-key">OpenAI API Key</Label>
-                <Input
-                  id="api-key"
-                  type="password"
-                  placeholder="sk-..."
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                />
-                <p className="text-sm text-muted-foreground">
-                  Your API key is stored locally and never sent to our servers
-                </p>
-              </div>
-            </CardContent>
-            <CardFooter>
-              <Button onClick={handleSaveApiKey} disabled={isLoading || !apiKey}>
-                {isLoading ? "Saving..." : "Save API Key"}
-              </Button>
-            </CardFooter>
-          </Card>
-
           <Card>
             <CardHeader>
               <CardTitle>AI Model Settings</CardTitle>
