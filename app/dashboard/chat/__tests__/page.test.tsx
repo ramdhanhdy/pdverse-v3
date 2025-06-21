@@ -29,8 +29,6 @@ jest.mock('@/lib/store/chatStore', () => ({
     attachedFiles: [],
     addAttachedFile: jest.fn(),
     removeAttachedFile: jest.fn(),
-    usePythonBackend: false,
-    setUsePythonBackend: jest.fn(),
     isFileSidebarOpen: false,
     setIsFileSidebarOpen: jest.fn(),
     isProcessingDocuments: false,

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { logger } from "@/lib/logger";
 
 const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000';
 
@@ -16,7 +15,7 @@ export async function POST(request: NextRequest) {
       filters = {},
     } = await request.json();
 
-    logger.debug(`Received query: '${query}'`);
+    console.log(`Received query: '${query}'`);
     
     if (!query || typeof query !== 'string') {
       return NextResponse.json({ error: "Invalid query: must be a non-empty string" }, { status: 400 });
