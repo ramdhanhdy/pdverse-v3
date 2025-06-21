@@ -159,6 +159,22 @@ function initializeDatabase() {
     )
   `);
 
+  // Create document_chunks_fts table for full-text search
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts USING fts5 (
+      content,
+      document_id UNINDEXED,
+      page_number UNINDEXED,
+      chunk_index UNINDEXED,
+      content_type UNINDEXED,
+      token_count UNINDEXED,
+      importance UNINDEXED,
+      created_at UNINDEXED,
+      content='document_chunks',
+      content_rowid='rowid'
+    )
+  `);
+
   console.log(`Database initialized at: ${DB_PATH}`);
   console.log('Database initialized successfully');
 }
@@ -597,40 +613,156 @@ export function saveDocumentChunk(data: {
   contentType?: string;
   tokenCount?: number;
   importance?: number;
-}): DocumentChunk {
-  const id = uuidv4();
-  const now = Math.floor(Date.now() / 1000);
-  
+}): DocumentChunk | null {
+  try {
+    const id = uuidv4();
+    const now = Math.floor(Date.now() / 1000);
+    
+    // Use a transaction to ensure data consistency
+    db.exec('BEGIN TRANSACTION');
+    
+    // Create a compound key to check for duplicates
+    const checkStmt = db.prepare(`
+      SELECT id FROM document_chunks 
+      WHERE document_id = ? AND page_number = ? AND chunk_index = ?
+    `);
+    
+    const existingChunk = checkStmt.get(data.documentId, data.pageNumber, data.chunkIndex);
+    
+    let chunkId = id;
+    
+    if (existingChunk) {
+      // Update instead of insert to avoid constraint errors
+      chunkId = existingChunk.id;
+      const updateStmt = db.prepare(`
+        UPDATE document_chunks 
+        SET content = ?, content_type = ?, token_count = ?, importance = ?
+        WHERE id = ?
+      `);
+      
+      updateStmt.run(
+        data.content,
+        data.contentType || 'text',
+        data.tokenCount || 0,
+        data.importance || 0.5,
+        chunkId
+      );
+      console.log(`Updated existing chunk ${chunkId} for document ${data.documentId}, page ${data.pageNumber}, index ${data.chunkIndex}`);
+    } else {
+      // Insert new record
+      const insertStmt = db.prepare(`
+        INSERT INTO document_chunks (
+          id, document_id, page_number, chunk_index, 
+          content, content_type, token_count, importance, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      
+      insertStmt.run(
+        chunkId,
+        data.documentId,
+        data.pageNumber,
+        data.chunkIndex,
+        data.content,
+        data.contentType || 'text',
+        data.tokenCount || 0,
+        data.importance || 0.5,
+        now
+      );
+      console.log(`Inserted new chunk ${chunkId} for document ${data.documentId}, page ${data.pageNumber}, index ${data.chunkIndex}`);
+    }
+    
+    // The FTS update is handled by triggers, so we don't need to manually insert into FTS
+    
+    // Commit the transaction
+    db.exec('COMMIT');
+    
+    // Return the record
+    const getStmt = db.prepare(`SELECT * FROM document_chunks WHERE id = ?`);
+    return getStmt.get(chunkId) as DocumentChunk;
+  } catch (error) {
+    // If anything goes wrong, roll back
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Error rolling back transaction:', rollbackError);
+    }
+    
+    console.error('Error saving document chunk:', error);
+    return null;
+  }
+}
+
+export function getDocumentChunks(documentId: string): DocumentChunk[] {
   const stmt = db.prepare(`
-    INSERT INTO document_chunks (
-      id, document_id, page_number, chunk_index, 
-      content, content_type, token_count, importance, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    SELECT * FROM document_chunks 
+    WHERE document_id = ? 
+    ORDER BY page_number, chunk_index
   `);
   
-  stmt.run(
-    id,
-    data.documentId,
-    data.pageNumber,
-    data.chunkIndex,
-    data.content,
-    data.contentType || 'text',
-    data.tokenCount || 0,
-    data.importance || 0.5,
-    now
-  );
+  return stmt.all(documentId) as DocumentChunk[];
+}
+
+export function getDocumentChunksByDocumentId(documentId: string): DocumentChunk[] {
+  const stmt = db.prepare(`
+    SELECT * FROM document_chunks 
+    WHERE document_id = ?
+    ORDER BY page_number ASC, chunk_index ASC
+  `);
   
-  return {
-    id,
-    documentId: data.documentId,
-    pageNumber: data.pageNumber,
-    chunkIndex: data.chunkIndex,
-    content: data.content,
-    contentType: data.contentType || 'text',
-    tokenCount: data.tokenCount || 0,
-    importance: data.importance || 0.5,
-    createdAt: now
-  };
+  return stmt.all(documentId) as DocumentChunk[];
+}
+
+/**
+ * Delete all chunks for a specific document
+ */
+export function deleteDocumentChunks(documentId: string): void {
+  console.log(`Deleting chunks for document: ${documentId}`);
+  const stmt = db.prepare('DELETE FROM document_chunks WHERE document_id = ?');
+  stmt.run(documentId);
+  console.log(`Deleted chunks for document: ${documentId}`);
+}
+
+/**
+ * Search for document chunks using full-text search
+ */
+export function searchDocumentChunks(query: string, limit: number = 20): {
+  chunk: DocumentChunk,
+  fileInfo: { id: string; filename: string; original_filename: string; }
+}[] {
+  // Use FTS5 to search document chunks
+  const stmt = db.prepare(`
+    SELECT 
+      dc.id, dc.document_id, dc.page_number, dc.chunk_index, 
+      dc.content, dc.content_type, dc.token_count, dc.importance, dc.created_at,
+      f.id as file_id, f.filename, f.original_filename
+    FROM document_chunks_fts fts
+    JOIN document_chunks dc ON fts.rowid = dc.rowid
+    JOIN files f ON dc.document_id = f.id
+    WHERE fts.content MATCH ?
+    ORDER BY rank
+    LIMIT ?
+  `);
+  
+  const results = stmt.all(query, limit);
+  
+  return results.map((row: any) => ({
+    chunk: {
+      id: row.id,
+      documentId: row.document_id,
+      pageNumber: row.page_number,
+      chunkIndex: row.chunk_index,
+      content: row.content,
+      contentType: row.content_type,
+      tokenCount: row.token_count,
+      importance: row.importance,
+      createdAt: row.created_at
+    },
+    fileInfo: {
+      id: row.file_id,
+      filename: row.filename,
+      original_filename: row.original_filename
+    }
+  }));
 }
 
 // Settings type

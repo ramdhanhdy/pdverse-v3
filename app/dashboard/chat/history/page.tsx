@@ -133,15 +133,15 @@ export default function ChatHistoryPage() {
   };
 
   return (
-    <div className="container mx-auto py-6">
+    <div className="w-full max-w-6xl mx-auto py-6 px-4">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Chat History</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Chat History</h1>
         <Link href="/dashboard/chat">
           <Button>New Chat</Button>
         </Link>
       </div>
 
-      <div className="mb-6">
+      <div className="mb-8">
         <Input
           type="text"
           placeholder="Search conversations..."
@@ -152,8 +152,8 @@ export default function ChatHistoryPage() {
       </div>
 
       {filteredChatHistory.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted mb-4">
+        <div className="text-center py-16 bg-muted/20 rounded-lg">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-muted mb-6">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="24"
@@ -164,25 +164,25 @@ export default function ChatHistoryPage() {
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="h-8 w-8 text-muted-foreground"
+              className="h-10 w-10 text-muted-foreground"
             >
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold mb-2">No conversations found</h2>
-          <p className="text-muted-foreground mb-4">
+          <h2 className="text-xl font-semibold mb-3">No conversations found</h2>
+          <p className="text-muted-foreground mb-6 max-w-md mx-auto">
             {searchQuery
-              ? "Try a different search term"
-              : "Start a new chat to begin a conversation"}
+              ? "Try a different search term or clear your search to see all conversations"
+              : "Start a new chat to begin asking questions about your PDF documents"}
           </p>
           <Link href="/dashboard/chat">
-            <Button>Start a new chat</Button>
+            <Button size="lg" className="px-6">Start a new chat</Button>
           </Link>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
           {filteredChatHistory.map((chat) => (
-            <Card key={chat.id} className="overflow-hidden">
+            <Card key={chat.id} className="overflow-hidden hover:shadow-md transition-shadow">
               <CardHeader className="pb-2">
                 <CardTitle className="truncate">{chat.title}</CardTitle>
                 <CardDescription>
@@ -190,11 +190,11 @@ export default function ChatHistoryPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="pb-2">
-                <p className="text-sm text-muted-foreground truncate">
+                <p className="text-sm text-muted-foreground line-clamp-2">
                   {chat.preview}
                 </p>
                 {chat.attachedFiles && chat.attachedFiles.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     {chat.attachedFiles.map((file) => (
                       <div
                         key={file.id}
@@ -221,7 +221,7 @@ export default function ChatHistoryPage() {
                   </div>
                 )}
               </CardContent>
-              <CardFooter className="flex justify-between pt-2">
+              <CardFooter className="flex justify-between pt-3 border-t">
                 <div className="text-xs text-muted-foreground">
                   Updated {formatRelativeTime(chat.updatedAt)}
                 </div>

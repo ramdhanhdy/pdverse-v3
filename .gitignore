@@ -1,10 +1,15 @@
 /.next
 /.vscode
 
+package-lock.json
+
 # dependencies
 /node_modules
 /.pnp
 .pnp.js
+
+python-backend/.env
+*.pyc
 
 *.pdf
 # testing
@@ -51,3 +56,27 @@ yarn-error.log*
 # System Files
 .DS_Store
 Thumbs.db
+
+# Add these lines
+python-backend/config.py
+**/__pycache__/
+*.pyc
+repomix-output.txt
+python-backend/__pycache__/search.cpython-311.pyc
+python-backend/.env
+python-backend/__pycache__/api.cpython-311.pyc
+python-backend/__pycache__/llm_helper.cpython-311.pyc
+python-backend/.env
+
+# Python cache
+__pycache__/
+
+# Editor backup files
+*.new
+*.fix
+
+# Test files
+streamlit_test_app.py
+
+# Tooling cache
+.repomix/

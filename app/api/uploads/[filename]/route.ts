@@ -31,6 +31,18 @@ export async function GET(
       );
     }
     
+    // Check if file is readable
+    try {
+      fs.accessSync(filePath, fs.constants.R_OK);
+      console.log(`File is readable: ${filePath}`);
+    } catch (err) {
+      console.error(`File is not readable: ${filePath}`, err);
+      return NextResponse.json(
+        { error: "File cannot be read" },
+        { status: 403 }
+      );
+    }
+    
     // Get file stats
     const stats = fs.statSync(filePath);
     console.log(`File size: ${stats.size} bytes`);

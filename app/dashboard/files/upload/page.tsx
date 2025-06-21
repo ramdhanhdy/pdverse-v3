@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatBytes, isValidPdf } from "@/lib/utils";
 import { toast } from "sonner";
+import { uploadFileToPythonBackend } from "@/lib/python-backend";
 
 type UploadFile = {
   id: string;
@@ -49,98 +50,27 @@ export default function UploadPage() {
   };
 
   const uploadFiles = async () => {
-    // Update files to uploading status
-    setFiles((prev) =>
-      prev.map((file) => ({
-        ...file,
-        status: "uploading",
-      }))
-    );
-
-    // Upload each file
-    for (const fileItem of files) {
-      try {
-        // Update progress to show starting upload
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileItem.id ? { ...f, progress: 10 } : f
-          )
-        );
-
-        const formData = new FormData();
+    try {
+      const formData = new FormData();
+      files.forEach(fileItem => {
         formData.append("file", fileItem.file);
+      });
 
-        // Upload file
-        const response = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
-        });
-
-        // Update progress during upload
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileItem.id ? { ...f, progress: 50 } : f
-          )
-        );
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Failed to upload file");
-        }
-
-        const data = await response.json();
-
-        // Update file status to success
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileItem.id
-              ? { ...f, progress: 100, status: "success" }
-              : f
-          )
-        );
-      } catch (error) {
-        console.error(`Error uploading ${fileItem.file.name}:`, error);
-        
-        // Update file status to error
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileItem.id
-              ? { 
-                  ...f, 
-                  progress: 0, 
-                  status: "error", 
-                  error: error instanceof Error ? error.message : "Upload failed" 
-                }
-              : f
-          )
-        );
-      }
-    }
-
-    // Check if all files were uploaded successfully
-    const allSuccess = files.every((file) => file.status === "success");
-    
-    if (allSuccess) {
-      toast.success("All files uploaded successfully!");
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
       
-      // Navigate to files page after a short delay
-      setTimeout(() => {
-        router.push("/dashboard/files");
-      }, 1500);
-    } else {
-      const errorCount = files.filter((file) => file.status === "error").length;
-      const successCount = files.filter((file) => file.status === "success").length;
+      const result = await response.json();
       
-      if (errorCount === 0) {
-        // This should never happen, but just in case
-        toast.success("All files uploaded successfully!");
-      } else if (successCount > 0) {
-        // Some succeeded, some failed
-        toast.error(`${errorCount} file(s) failed to upload. ${successCount} file(s) uploaded successfully.`);
-      } else {
-        // All failed
-        toast.error(`Failed to upload files. Please try again.`);
+      if (!result.success) {
+        throw new Error(result.error || 'Upload failed');
       }
+
+      toast.success("Files uploaded successfully");
+      router.push("/dashboard/files");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "File processing failed");
     }
   };
 

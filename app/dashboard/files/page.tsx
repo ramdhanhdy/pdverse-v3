@@ -6,6 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatBytes, truncateFilename } from "@/lib/utils";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Search, Upload } from "lucide-react";
+import { searchDocumentsInPythonBackend } from "@/lib/python-backend";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PremiumSearchProgress } from "@/components/premium-search-progress";
+import { FileLoadingProgress } from "@/components/file-loading-progress";
+import { PremiumSearchResults } from "@/components/premium-search-results";
 
 type FileItem = {
   id: string;
@@ -19,34 +28,59 @@ type FileItem = {
 };
 
 export default function FilesPage() {
-  const [view, setView] = useState<"grid" | "list">("grid");
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isDisplayingSearchResults, setIsDisplayingSearchResults] = useState(false);
+  const [fulltextResults, setFulltextResults] = useState<Array<{
+    chunk: {
+      id: string;
+      documentId: string;
+      pageNumber: number;
+      chunkIndex: number;
+      content: string;
+      contentType: string;
+    };
+    fileInfo: {
+      id: string;
+      filename: string;
+      original_filename: string;
+      author: string;
+    };
+    score: number;
+  }>>([]);
+  const [fulltextLoading, setFulltextLoading] = useState(false);
+  const [searchType, setSearchType] = useState<'hybrid' | 'vector' | 'fulltext'>('hybrid');
+  const [searchStartTime, setSearchStartTime] = useState<number | null>(null);
 
-  // Fetch files from API
   useEffect(() => {
     const fetchFiles = async () => {
+      setLoading(true);
       try {
-        setLoading(true);
-        const response = await fetch("/api/files");
-        
+        const response = await fetch('/api/files');
         if (!response.ok) {
-          throw new Error(`Failed to fetch files: ${response.status} ${response.statusText}`);
+          throw new Error(`Failed to fetch files: ${response.statusText}`);
         }
-        
         const data = await response.json();
-        console.log("Files API response:", data); // Debug log
-        setFiles(Array.isArray(data) ? data : data.files || []);
+        const filesData = data.files || [];
+        const mappedFiles = filesData.map((doc: any) => ({
+          id: doc.id,
+          filename: doc.filename || doc.title,
+          original_filename: doc.title,
+          size: doc.file_size || 0,
+          mimetype: 'application/pdf',
+          created_at: new Date(doc.creation_date || Date.now()).getTime() / 1000,
+          updated_at: new Date(doc.modification_date || Date.now()).getTime() / 1000,
+        }));
+        setFiles(mappedFiles);
       } catch (error) {
-        console.error("Error fetching files:", error);
-        toast.error("Failed to load files. Please try again.");
-        setFiles([]); // Set empty array to prevent undefined errors
+        console.error('Error fetching files:', error);
+        toast.error('Failed to load files. Please try again.');
       } finally {
         setLoading(false);
       }
     };
-
     fetchFiles();
   }, []);
 
@@ -65,295 +99,243 @@ export default function FilesPage() {
   };
 
   const deleteSelectedFiles = async () => {
-    if (selectedFiles.length === 0) return;
-    
-    try {
-      // Delete each selected file
-      for (const fileId of selectedFiles) {
-        const response = await fetch(`/api/files?id=${fileId}`, {
-          method: "DELETE",
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Failed to delete file");
+    const promise = fetch('/api/files/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_ids: selectedFiles }),
+    });
+
+    toast.promise(promise, {
+      loading: 'Deleting files...',
+      success: async (res) => {
+        if (res.ok) {
+          setFiles((prev) => prev.filter((file) => !selectedFiles.includes(file.id)));
+          setSelectedFiles([]);
+          return 'Selected files deleted successfully.';
+        } else {
+          const errorData = await res.json();
+          throw new Error(errorData.error || 'Failed to delete files.');
         }
-      }
-      
-      // Update local state
-      setFiles((prev) => prev.filter((file) => !selectedFiles.includes(file.id)));
-      setSelectedFiles([]);
-      
-      toast.success(`${selectedFiles.length} file(s) deleted successfully`);
-    } catch (error) {
-      console.error("Error deleting files:", error);
-      toast.error("Failed to delete some files. Please try again.");
+      },
+      error: (err) => err.message,
+    });
+  };
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+  };
+
+  const handleFullTextSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setFulltextLoading(true);
+    setSearchStartTime(Date.now());
+    setIsDisplayingSearchResults(true);
+    try {
+      const searchResults = await searchDocumentsInPythonBackend(searchQuery, {
+        search_type: searchType,
+      });
+      const transformedResults = searchResults.results.map((result: any) => ({
+        chunk: {
+          id: result.chunk_id,
+          documentId: result.document_id,
+          pageNumber: result.page_number || 1,
+          chunkIndex: 0,
+          content: result.content,
+          contentType: 'text',
+        },
+        fileInfo: {
+          id: result.document_id,
+          filename: result.document_info?.title || 'Unknown',
+          original_filename: result.document_info?.title || 'Unknown',
+          author: result.document_info?.author || 'Unknown',
+        },
+        score: result.score,
+      }));
+      setFulltextResults(transformedResults);
+    } catch (error: any) {
+      console.error("Error during full-text search:", error);
+      toast.error(`An error occurred during search: ${error.message}`);
+      setFulltextResults([]);
+    } finally {
+      setFulltextLoading(false);
     }
   };
 
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleFullTextSearch();
+    }
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setFulltextResults([]);
+    setIsDisplayingSearchResults(false);
+  };
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Your Files</h1>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setView("grid")}
-            className={view === "grid" ? "bg-accent" : ""}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-            >
-              <rect width="7" height="7" x="3" y="3" rx="1" />
-              <rect width="7" height="7" x="14" y="3" rx="1" />
-              <rect width="7" height="7" x="14" y="14" rx="1" />
-              <rect width="7" height="7" x="3" y="14" rx="1" />
-            </svg>
-            <span className="sr-only">Grid view</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setView("list")}
-            className={view === "list" ? "bg-accent" : ""}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-            >
-              <line x1="8" x2="21" y1="6" y2="6" />
-              <line x1="8" x2="21" y1="12" y2="12" />
-              <line x1="8" x2="21" y1="18" y2="18" />
-              <line x1="3" x2="3" y1="6" y2="6" />
-              <line x1="3" x2="3" y1="12" y2="12" />
-              <line x1="3" x2="3" y1="18" y2="18" />
-            </svg>
-            <span className="sr-only">List view</span>
-          </Button>
-          <Link href="/dashboard/files/upload">
-            <Button>Upload</Button>
-          </Link>
-        </div>
+    <div className="w-full max-w-6xl mx-auto px-4 py-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <h1 className="text-2xl font-bold tracking-tight">Your Files</h1>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={selectAllFiles}
-          >
-            {selectedFiles.length === files.length && files.length > 0
-              ? "Deselect All"
-              : "Select All"}
-          </Button>
-          {selectedFiles.length > 0 && (
+      <div className="flex items-center mb-6 space-x-2">
+        <div className="relative flex-1">
+          <Input
+            placeholder="Search document content..."
+            value={searchQuery}
+            onChange={handleSearchChange}
+            onKeyDown={handleSearchKeyDown}
+            className="flex-1"
+          />
+        </div>
+        <Select value={searchType} onValueChange={(value) => setSearchType(value as any)}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Select search type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="hybrid">Hybrid Search</SelectItem>
+            <SelectItem value="vector">Vector Search</SelectItem>
+            <SelectItem value="fulltext">Full-text Search</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button onClick={handleFullTextSearch} disabled={fulltextLoading || !searchQuery}>
+          <Search className="mr-2 h-4 w-4" />
+          Search
+        </Button>
+        {isDisplayingSearchResults && (
+          <Button variant="outline" onClick={clearSearch}>Clear</Button>
+        )}
+      </div>
+
+      {!isDisplayingSearchResults && (
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
             <Button
-              variant="destructive"
+              variant="outline"
               size="sm"
-              onClick={deleteSelectedFiles}
+              onClick={selectAllFiles}
+              disabled={files.length === 0}
             >
-              Delete Selected
+              {selectedFiles.length === files.length ? "Deselect All" : "Select All"}
             </Button>
-          )}
-        </div>
-        <div className="text-sm text-muted-foreground">
-          {files.length} {files.length === 1 ? "file" : "files"}
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        </div>
-      ) : files.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 gap-4">
-          <div className="text-4xl">📄</div>
-          <h3 className="text-xl font-semibold">No files yet</h3>
-          <p className="text-muted-foreground text-center max-w-md">
-            Upload your first PDF file to get started with PDVerse.
-          </p>
-          <Link href="/dashboard/files/upload">
-            <Button>Upload Your First File</Button>
-          </Link>
-        </div>
-      ) : view === "grid" ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {files.map((file) => (
-            <Card
-              key={file.id}
-              className={`overflow-hidden ${
-                selectedFiles.includes(file.id) ? "ring-2 ring-primary" : ""
-              }`}
-            >
-              <CardContent className="p-0">
-                <div className="relative">
-                  <div className="absolute top-2 right-2 z-10">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-7 w-7 bg-background/80 backdrop-blur-sm"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        toggleFileSelection(file.id);
-                      }}
-                    >
-                      {selectedFiles.includes(file.id) ? (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-4 w-4"
-                        >
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      ) : (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-4 w-4"
-                        >
-                          <rect width="18" height="18" x="3" y="3" rx="2" />
-                        </svg>
-                      )}
-                    </Button>
-                  </div>
-                  <Link href={`/dashboard/files/${file.id}`}>
-                    <div className="aspect-[3/4] bg-accent flex items-center justify-center">
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-16 w-16 text-muted-foreground"
-                      >
-                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                        <polyline points="14 2 14 8 20 8" />
-                      </svg>
-                    </div>
-                    <div className="p-3">
-                      <div className="font-medium truncate">
-                        {truncateFilename(file.original_filename)}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {formatBytes(file.size)} • {new Date(file.updated_at * 1000).toLocaleDateString()}
-                      </div>
-                    </div>
-                  </Link>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <div className="border rounded-md divide-y">
-          {files.map((file) => (
-            <div
-              key={file.id}
-              className={`flex items-center p-3 hover:bg-accent ${
-                selectedFiles.includes(file.id) ? "bg-accent" : ""
-              }`}
-            >
-              <div className="mr-3">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    toggleFileSelection(file.id);
-                  }}
-                >
-                  {selectedFiles.includes(file.id) ? (
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="h-3 w-3"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  ) : (
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="h-3 w-3"
-                    >
-                      <rect width="18" height="18" x="3" y="3" rx="2" />
-                    </svg>
-                  )}
-                </Button>
-              </div>
-              <Link
-                href={`/dashboard/files/${file.id}`}
-                className="flex-1 flex items-center"
-              >
-                <div className="mr-3">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-6 w-6 text-muted-foreground"
-                  >
-                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                    <polyline points="14 2 14 8 20 8" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{file.original_filename}</div>
-                </div>
-                <div className="ml-4 text-sm text-muted-foreground">
-                  {formatBytes(file.size)}
-                </div>
-                <div className="ml-4 text-sm text-muted-foreground">
-                  {new Date(file.updated_at * 1000).toLocaleDateString()}
-                </div>
-              </Link>
-            </div>
-          ))}
+          </div>
+          <div className="text-sm text-muted-foreground">
+            {files.length} {files.length === 1 ? "file" : "files"}
+          </div>
         </div>
       )}
+
+      {isDisplayingSearchResults ? (
+        fulltextLoading ? (
+          <div className="space-y-4">
+            <PremiumSearchProgress
+              isSearching={fulltextLoading}
+              searchType={searchType}
+              query={searchQuery}
+              className="mb-6"
+            />
+            {[...Array(4)].map((_, index) => (
+              <Card key={index} className="overflow-hidden">
+                <CardContent className="p-4">
+                  <Skeleton className="h-4 w-1/4 mb-2" />
+                  <Skeleton className="h-4 w-full mb-2" />
+                  <Skeleton className="h-4 w-3/4" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <PremiumSearchResults
+            results={fulltextResults}
+            searchQuery={searchQuery}
+            searchType={searchType}
+            searchTime={(Date.now() - (searchStartTime || Date.now())) / 1000}
+          />
+        )
+      ) : (
+        loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {[...Array(8)].map((_, index) => (
+              <Card key={index}><CardContent className="p-4"><Skeleton className="h-32" /></CardContent></Card>
+            ))}
+          </div>
+        ) : files.length === 0 ? (
+          <FileLoadingProgress isLoading={loading} />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {files.map((file) => (
+              <Card key={file.id} className={`overflow-hidden hover:shadow-md transition-shadow ${selectedFiles.includes(file.id) ? "ring-2 ring-primary" : ""}`}>
+                <CardContent className="p-0">
+                  <div className="relative">
+                    <div className="absolute top-2 right-2 z-10">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-7 w-7 bg-background/80 backdrop-blur-sm"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleFileSelection(file.id);
+                        }}
+                      >
+                        {selectedFiles.includes(file.id) ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                            <rect width="18" height="18" x="3" y="3" rx="2" />
+                          </svg>
+                        )}
+                      </Button>
+                    </div>
+                    <Link href={`/dashboard/files/${file.id}`} className="block">
+                      <div className="aspect-video bg-muted flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /></svg>
+                      </div>
+                      <div className="p-4 border-t">
+                        <div className="font-medium truncate">{truncateFilename(file.original_filename)}</div>
+                        <div className="text-xs text-muted-foreground mt-2 flex justify-between">
+                          <span>{formatBytes(file.size)}</span>
+                          <span>{new Date(file.updated_at * 1000).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )
+      )}
+
+
+
+      {!isDisplayingSearchResults && (
+        <Button asChild className="fixed bottom-8 right-8 h-16 w-16 rounded-full shadow-lg z-20">
+          <Link href="/dashboard/files/upload" aria-label="Upload File">
+            <Upload className="h-8 w-8" />
+          </Link>
+        </Button>
+      )}
     </div>
+  );
+}
+
+// Helper function to highlight search terms in text
+function highlightSearchTerm(text: string, query: string): React.ReactNode {
+  if (!query.trim()) return text;
+  
+  const parts = text.split(new RegExp(`(${query})`, 'gi'));
+  
+  return (
+    <>
+      {parts.map((part, i) => 
+        part.toLowerCase() === query.toLowerCase() 
+          ? <mark key={i} className="bg-yellow-200 dark:bg-yellow-800">{part}</mark> 
+          : part
+      )}
+    </>
   );
 }

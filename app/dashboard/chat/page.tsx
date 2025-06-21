@@ -2,17 +2,13 @@
 
 import { useRef, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { useChat } from 'ai/react';
+import { useChat } from '@ai-sdk/react';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { ChatModeSelector } from './components/ChatModeSelector';
+import { FileSidebar } from './components/FileSidebar';
+import { DocumentChatMessage } from './components/DocumentChatMessage';
+import { Loader2, FileText, Send } from 'lucide-react';
 
-// Simple type for file attachments
 type FileAttachment = {
   id: string;
   name: string;
@@ -20,246 +16,274 @@ type FileAttachment = {
 
 export default function ChatPage() {
   const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [availableFiles, setAvailableFiles] = useState<FileAttachment[]>([]);
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
-  const [aiModel, setAiModel] = useState("GPT-4o");
+  const [isFileSidebarOpen, setIsFileSidebarOpen] = useState(false);
+  const [chatMode, setChatMode] = useState<'document' | 'general'>('general');
+  const [usePythonBackend, setUsePythonBackend] = useState<boolean>(false);
+  const [isProcessingDocuments, setIsProcessingDocuments] = useState(false);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load AI model from settings
-  useEffect(() => {
-    const loadAiModel = () => {
-      try {
-        const savedModel = localStorage.getItem("ai_model") || "gpt-4o";
-        // Convert model ID to display name
-        const modelDisplayNames: Record<string, string> = {
-          "gpt-4o": "GPT-4o",
-          "gpt-4-turbo": "GPT-4 Turbo",
-          "gpt-4": "GPT-4",
-          "gpt-3.5-turbo": "GPT-3.5 Turbo"
-        };
-        setAiModel(modelDisplayNames[savedModel] || "GPT-4o");
-      } catch (error) {
-        console.error("Error loading AI model setting:", error);
-      }
-    };
-
-    loadAiModel();
-  }, []);
-
-  // Initialize chat
-  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, isLoading, setInput } = useChat({
     api: '/api/chat',
     body: {
       fileIds: attachedFiles.map(file => file.id),
+      chatMode: chatMode,
+      usePythonBackend: usePythonBackend,
+    },
+    initialMessages: [],
+    streamProtocol: 'text',
+    onResponse: (response) => {
+      console.log('Raw response received:', response);
+      console.log('Response status:', response.status);
+      
+      // Log headers safely
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+      console.log('Response headers:', headers);
+      
+      // Set processing state to false when response is received
+      setIsProcessingDocuments(false);
+    },
+    onFinish: (message) => {
+      console.log('Stream finished with message:', message);
+      setIsProcessingDocuments(false);
+    },
+    onError: (error) => {
+      console.error('useChat error:', error);
+      setIsProcessingDocuments(false);
     },
   });
 
-  // Fetch available files for the file picker
-  const fetchAvailableFiles = async () => {
-    setIsLoadingFiles(true);
-    try {
-      const response = await fetch("/api/files");
-      if (!response.ok) throw new Error("Failed to fetch files");
-      const data = await response.json();
-      
-      // Handle empty response or no files
-      if (!data || !data.files || data.files.length === 0) {
-        setAvailableFiles([]);
-        return;
-      }
-      
-      // Map files to a simpler format
-      const files = data.files.map((file: any) => ({
-        id: file.id,
-        name: file.original_filename || file.filename
-      }));
-      
-      setAvailableFiles(files);
-    } catch (error) {
-      console.error("Error fetching files:", error);
-      setAvailableFiles([]);
-    } finally {
-      setIsLoadingFiles(false);
-    }
-  };
+  // Log messages and loading state
+  useEffect(() => {
+    console.log('Messages updated:', messages);
+    console.log('isLoading:', isLoading);
+  }, [messages, isLoading]);
 
-  // Handle attaching a file
   const handleAttachFile = (file: FileAttachment) => {
     if (!attachedFiles.some(f => f.id === file.id)) {
       setAttachedFiles([...attachedFiles, file]);
     }
-    setIsDialogOpen(false);
   };
 
-  // Handle removing an attached file
   const handleRemoveFile = (fileId: string) => {
     setAttachedFiles(attachedFiles.filter(file => file.id !== fileId));
   };
 
-  // Custom submit handler
-  const handleMessageSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    handleSubmit(e);
-    // Reset text area height
-    if (textAreaRef.current) {
-      textAreaRef.current.style.height = 'auto';
+  // Set chat mode to document if files are attached
+  useEffect(() => {
+    if (attachedFiles.length > 0 && chatMode !== 'document') {
+      setChatMode('document');
     }
+  }, [attachedFiles, chatMode]);
+  
+  // Custom submit handler to set processing state
+  const handleCustomSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    
+    if (!input.trim() || isLoading) return;
+    
+    // Set processing state to true when submitting in document mode
+    if (chatMode === 'document' && attachedFiles.length > 0) {
+      setIsProcessingDocuments(true);
+    }
+    
+    handleSubmit(e);
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Model indicator */}
-      <div className="px-4 pt-4 flex justify-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-muted text-sm font-medium">
-          <span className="h-2 w-2 rounded-full bg-green-500"></span>
-          <span>Model: {aiModel}</span>
-        </div>
-      </div>
-      
-      {/* Messages display */}
-      <div className="flex-1 overflow-y-auto my-4 px-4 space-y-4">
-        {messages.map(message => (
-          <div 
-            key={message.id} 
-            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div 
-              className={`max-w-[80%] rounded-lg p-4 ${
-                message.role === 'user' 
-                  ? 'bg-primary text-primary-foreground' 
-                  : 'bg-muted'
-              }`}
+    <div className="flex flex-col h-[calc(100vh-4rem)] w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex-1 overflow-y-auto space-y-5 pt-6">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              <div className="whitespace-pre-wrap">{message.content}</div>
-            </div>
-          </div>
-        ))}
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <div className="mb-4">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M20.25 6.75H16.5V5.25C16.5 4.00736 15.4926 3 14.25 3H9.75C8.50736 3 7.5 4.00736 7.5 5.25V6.75H3.75C3.33579 6.75 3 7.08579 3 7.5V19.5C3 20.7426 4.00736 21.75 5.25 21.75H18.75C19.9926 21.75 21 20.7426 21 19.5V7.5C21 7.08579 20.6642 6.75 20.25 6.75ZM9 5.25C9 4.83579 9.33579 4.5 9.75 4.5H14.25C14.6642 4.5 15 4.83579 15 5.25V6.75H9V5.25ZM19.5 19.5C19.5 19.9142 19.1642 20.25 18.75 20.25H5.25C4.83579 20.25 4.5 19.9142 4.5 19.5V8.25H7.5V9.75C7.5 10.1642 7.83579 10.5 8.25 10.5C8.66421 10.5 9 10.1642 9 9.75V8.25H15V9.75C15 10.1642 15.3358 10.5 15.75 10.5C16.1642 10.5 16.5 10.1642 16.5 9.75V8.25H19.5V19.5Z" fill="currentColor"/>
-              </svg>
-            </div>
-            <p className="text-sm">Attach PDFs to start chatting</p>
-          </div>
-        )}
-      </div>
-      
-      {/* Attached files display */}
-      {attachedFiles.length > 0 && (
-        <div className="px-4 mb-2 flex flex-wrap gap-2">
-          {attachedFiles.map(file => (
-            <div key={file.id} className="bg-muted px-3 py-1 rounded-full text-sm flex items-center gap-2">
-              <span className="truncate max-w-xs">{file.name}</span>
-              <button 
-                onClick={() => handleRemoveFile(file.id)}
-                className="text-muted-foreground hover:text-destructive"
-                aria-label="Remove file"
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9 3L3 9M3 3L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </button>
+              <div className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} max-w-[90%] sm:max-w-[85%] md:max-w-[80%]`}>
+                {message.role !== 'user' && (
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/60 text-[10px] font-medium ml-1 mb-1 w-fit">
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-500"></span>
+                    <span>GPT-4o</span>
+                  </div>
+                )}
+                <div
+                  className={`w-full rounded-lg p-4 text-sm shadow-sm ${
+                    message.role === 'user' 
+                      ? 'bg-primary text-primary-foreground rounded-tr-none' 
+                      : 'bg-muted rounded-tl-none'
+                  }`}
+                >
+                  {chatMode === 'document' && !isLoading ? (
+                    <DocumentChatMessage 
+                      content={message.content} 
+                      isUser={message.role === 'user'} 
+                      documentInfo={attachedFiles.map(file => ({
+                        id: file.id,
+                        title: file.name,
+                      }))}
+                    />
+                  ) : (
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1 px-1">
+                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
             </div>
           ))}
-        </div>
-      )}
-      
-      {/* Input form */}
-      <form onSubmit={handleMessageSubmit} className="px-4 pb-4 flex items-end gap-2">
-        <div className="flex-1 relative">
-          <Textarea
-            ref={textAreaRef}
-            value={input}
-            onChange={handleInputChange}
-            placeholder="Ask a question about your PDFs..."
-            className="w-full p-3 pr-20 min-h-[60px] max-h-[200px] resize-none rounded-full focus-visible:ring-1 focus-visible:ring-ring"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit(e as any);
-              }
-            }}
-          />
-          
-          {/* File attachment button */}
-          <button 
-            type="button" 
-            className="absolute bottom-[13px] right-[60px] text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => {
-              setIsDialogOpen(true);
-              fetchAvailableFiles();
-            }}
-            aria-label="Attach files"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M8.00001 1.33334C4.31801 1.33334 1.33334 4.31801 1.33334 8.00001C1.33334 11.682 4.31801 14.6667 8.00001 14.6667C11.682 14.6667 14.6667 11.682 14.6667 8.00001C14.6667 4.31801 11.682 1.33334 8.00001 1.33334ZM8.00001 13.3333C5.05734 13.3333 2.66668 10.9427 2.66668 8.00001C2.66668 5.05734 5.05734 2.66668 8.00001 2.66668C10.9427 2.66668 13.3333 5.05734 13.3333 8.00001C13.3333 10.9427 10.9427 13.3333 8.00001 13.3333Z" fill="currentColor"/>
-              <path d="M8.66668 4.66666H7.33334V7.33332H4.66668V8.66666H7.33334V11.3333H8.66668V8.66666H11.3333V7.33332H8.66668V4.66666Z" fill="currentColor"/>
-            </svg>
-          </button>
-          
-          <Button 
-            type="submit" 
-            disabled={isLoading || !input.trim()}
-            className="absolute right-2 bottom-[10px] h-10 w-10 rounded-full p-0"
-            aria-label="Send message"
-          >
-            {isLoading ? (
-              <div className="animate-spin h-4 w-4 border-2 border-background border-t-transparent rounded-full" />
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M14.6667 1.33334L7.33334 8.66668M14.6667 1.33334L10 14.6667L7.33334 8.66668M14.6667 1.33334L1.33334 6.00001L7.33334 8.66668" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            )}
-          </Button>
-        </div>
-      </form>
-      
-      {/* File selection dialog */}
-      {isDialogOpen && (
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Attach PDF Files</DialogTitle>
-            </DialogHeader>
-            <div className="py-4 max-h-[400px] overflow-y-auto">
-              {isLoadingFiles ? (
-                <div className="flex justify-center items-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-12">
+              <div className="bg-primary/5 p-6 rounded-full mb-4">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-primary">
+                  <path d="M8 9H16M8 13H14M18 15L21 18V4C21 3.46957 20.7893 2.96086 20.4142 2.58579C20.0391 2.21071 19.5304 2 19 2H5C4.46957 2 3.96086 2.21071 3.58579 2.58579C3.21071 2.96086 3 3.46957 3 4V18C3 18.5304 3.21071 19.0391 3.58579 19.4142C3.96086 19.7893 4.46957 20 5 20H18Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <h2 className="text-xl font-semibold text-foreground">Welcome to PDVerse Chat</h2>
+              <p className="text-sm text-muted-foreground mt-2 max-w-md text-center">Ask any question or attach PDFs to ask about your documents</p>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8 max-w-2xl">
+                <div className="bg-card p-4 rounded-lg border shadow-sm">
+                  <h3 className="font-medium mb-2 flex items-center gap-2">
+                    <span className="bg-primary/20 p-1 rounded-md">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 16V12M12 8H12.01M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </span>
+                    General Chat
+                  </h3>
+                  <p className="text-sm text-muted-foreground">Ask any question and get answers from our AI assistant</p>
                 </div>
-              ) : availableFiles.length > 0 ? (
-                <div className="space-y-2">
-                  {availableFiles.map(file => (
-                    <div 
-                      key={file.id} 
-                      className="flex items-center p-3 rounded-lg border border-border hover:bg-muted cursor-pointer transition-colors"
-                      onClick={() => handleAttachFile(file)}
-                    >
-                      <div className="mr-3 text-muted-foreground">
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M17.5 15.8333V17.5H2.5V15.8333H17.5ZM4.16667 3.33333H15.8333V10.8333H4.16667V3.33333ZM5.83333 5V9.16667H14.1667V5H5.83333ZM8.33333 11.6667H11.6667V14.1667H8.33333V11.6667Z" fill="currentColor"/>
-                        </svg>
-                      </div>
-                      <div className="font-medium truncate">{file.name}</div>
-                    </div>
-                  ))}
+                <div className="bg-card p-4 rounded-lg border shadow-sm">
+                  <h3 className="font-medium mb-2 flex items-center gap-2">
+                    <span className="bg-primary/20 p-1 rounded-md">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M9 12H15M9 16H15M17 21H7C5.89543 21 5 20.1046 5 19V5C5 3.89543 5.89543 3 7 3H12.5858C12.851 3 13.1054 3.10536 13.2929 3.29289L18.7071 8.70711C18.8946 8.89464 19 9.149 19 9.41421V19C19 20.1046 18.1046 21 17 21Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </span>
+                    Document Chat
+                  </h3>
+                  <p className="text-sm text-muted-foreground">Upload documents and ask questions about their content</p>
                 </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <div className="mb-2">
-                    <svg className="mx-auto" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM11 15H13V17H11V15ZM11 7H13V13H11V7Z" fill="currentColor"/>
-                    </svg>
-                  </div>
-                  <p>No files available. Please upload some PDFs first.</p>
-                </div>
-              )}
+              </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
+          )}
+          
+          {/* Document processing indicator */}
+          {isProcessingDocuments && (
+            <div className="flex items-center justify-center py-4">
+              <div className="flex items-center gap-2 px-4 py-2 bg-muted rounded-lg text-sm shadow-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Processing documents...</span>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="bg-background/80 backdrop-blur-md p-4">
+          {attachedFiles.length > 0 && (
+            <div className="max-w-5xl mx-auto mb-3 flex items-center">
+              <div className="flex items-center gap-2">
+                <div className="bg-primary/10 p-1 rounded-md">
+                  <FileText className="h-4 w-4 text-primary" />
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {attachedFiles.length} document{attachedFiles.length !== 1 ? 's' : ''} attached
+                </div>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 text-xs ml-2"
+                onClick={() => setIsFileSidebarOpen(true)}
+              >
+                Manage
+              </Button>
+            </div>
+          )}
+          
+          <form onSubmit={handleCustomSubmit} className="relative max-w-5xl mx-auto">
+            <div className="flex items-center gap-3 p-2 bg-muted/30 rounded-2xl border shadow-sm">
+              <div className="flex items-center gap-2 pl-2">
+                <ChatModeSelector 
+                  currentMode={chatMode}
+                  onModeChange={(mode) => {
+                    setChatMode(mode);
+                    if (mode !== 'document') setAttachedFiles([]);
+                  }}
+                  compact={true}
+                />
+                {chatMode === 'general' && (
+                  <button
+                    type="button"
+                    onClick={() => setUsePythonBackend(!usePythonBackend)}
+                    className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
+                      usePythonBackend 
+                        ? 'bg-primary text-primary-foreground' 
+                        : 'bg-muted text-muted-foreground'
+                    }`}
+                    title={usePythonBackend ? "Using Python Backend" : "Using AI SDK Directly"}
+                  >
+                    {usePythonBackend ? "PY" : "SDK"}
+                  </button>
+                )}
+              </div>
+              <div className="relative flex-1 bg-background rounded-xl overflow-hidden">
+                <Textarea
+                  ref={textAreaRef}
+                  value={input}
+                  onChange={handleInputChange}
+                  placeholder={`Ask a question in ${chatMode === 'document' ? 'Document Chat' : 'General Chat'} mode...`}
+                  className="w-full p-3 pr-12 min-h-[60px] max-h-[180px] resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      const form = e.currentTarget.closest('form');
+                      if (form && !isLoading && input.trim()) {
+                        if (chatMode === 'document' && attachedFiles.length > 0) {
+                          setIsProcessingDocuments(true);
+                        }
+                        form.requestSubmit();
+                      }
+                    }
+                  }}
+                />
+                {chatMode === 'document' && (
+                  <button 
+                    type="button" 
+                    className="absolute right-2 bottom-[14px] p-1.5 rounded-full hover:bg-muted transition-colors"
+                    onClick={() => setIsFileSidebarOpen(true)}
+                    aria-label="Attach files"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                )}
+              </div>
+              <Button 
+                type="submit" 
+                disabled={isLoading || !input.trim()}
+                className="h-12 w-12 rounded-full p-0 flex-shrink-0 shadow-md mr-1 bg-primary hover:bg-primary/90 transition-colors"
+                aria-label="Send message"
+              >
+                {isLoading ? (
+                  <div className="animate-spin h-5 w-5 border-2 border-background border-t-transparent rounded-full" />
+                ) : (
+                  <Send className="h-5 w-5" />
+                )}
+              </Button>
+            </div>
+          </form>
+        </div>
+
+        <FileSidebar
+          isOpen={isFileSidebarOpen}
+          onOpenChange={setIsFileSidebarOpen}
+          onAttachFile={handleAttachFile}
+          attachedFiles={attachedFiles}
+          onRemoveFile={handleRemoveFile}
+        />
     </div>
   );
 }
